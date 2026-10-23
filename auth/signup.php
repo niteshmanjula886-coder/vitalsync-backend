@@ -1,7 +1,8 @@
 <?php
+
 header("Content-Type: application/json; charset=UTF-8");
 
-require_once "config.php";
+require_once __DIR__ . "/../config/db.php";
 
 if ($_SERVER["REQUEST_METHOD"] !== "POST") {
     http_response_code(405);
@@ -18,7 +19,7 @@ if (!is_array($data)) {
     http_response_code(400);
     echo json_encode([
         "success" => false,
-        "message" => "Invalid request"
+        "message" => "Invalid request data"
     ]);
     exit;
 }
@@ -28,21 +29,59 @@ $email = strtolower(trim($data["email"] ?? ""));
 $password = $data["password"] ?? "";
 $confirmPassword = $data["confirm_password"] ?? "";
 
-if (
-    $name === "" ||
-    strlen($name) > 100 ||
-    !filter_var($email, FILTER_VALIDATE_EMAIL) ||
-    strlen($email) > 255 ||
-    !is_string($password) ||
-    strlen($password) < 8 ||
-    strlen($password) > 72 ||
-    !is_string($confirmPassword) ||
-    $password !== $confirmPassword
-) {
+if ($name === "" || strlen($name) > 100) {
     http_response_code(400);
     echo json_encode([
         "success" => false,
-        "message" => "Check your details and confirm both passwords match"
+        "message" => "Enter a valid name"
+    ]);
+    exit;
+}
+
+if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 255) {
+    http_response_code(400);
+    echo json_encode([
+        "success" => false,
+        "message" => "Enter a valid email"
+    ]);
+    exit;
+}
+
+if (!is_string($password) || strlen($password) < 8 || strlen($password) > 72) {
+    http_response_code(400);
+    echo json_encode([
+        "success" => false,
+        "message" => "Password must be 8–72 characters"
+    ]);
+    exit;
+}
+
+if (!is_string($confirmPassword) || $password !== $confirmPassword) {
+    http_response_code(400);
+    echo json_encode([
+        "success" => false,
+        "message" => "Passwords do not match"
+    ]);
+    exit;
+}
+
+// Enforce one account for this app
+$check = $conn->query("SELECT id FROM users LIMIT 1");
+
+if (!$check) {
+    http_response_code(500);
+    echo json_encode([
+        "success" => false,
+        "message" => "Unable to check account"
+    ]);
+    exit;
+}
+
+if ($check->num_rows > 0) {
+    http_response_code(409);
+    echo json_encode([
+        "success" => false,
+        "message" => "Account already exists"
     ]);
     exit;
 }
@@ -69,7 +108,8 @@ if ($stmt->execute()) {
         "message" => "Email already registered"
     ]);
 } else {
-    error_log("Signup error: " . $stmt->error);
+    error_log("VitalSync signup error: " . $stmt->error);
+
     http_response_code(500);
     echo json_encode([
         "success" => false,
@@ -79,4 +119,3 @@ if ($stmt->execute()) {
 
 $stmt->close();
 $conn->close();
-?>
