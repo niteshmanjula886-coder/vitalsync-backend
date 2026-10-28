@@ -1,0 +1,10 @@
+# Use this workspace to collaborate
+workspace:
+  id: 28e90e91-2d08-4803-8a06-82e1d7cdd226
+
+localResources:
+  collections:
+    - ../collections/VitalSync_Auth_Profile.postman_collection.json
+    - ../collections/VitalSync_Complete_API_Collection.postman_collection.json
+  environments:
+    - ../environments/VitalSync_Local.postman_environment.json

@@ -1,0 +1,347 @@
+{
+  "info": {
+    "_postman_id": "7b8e1a12-8e65-4f09-913f-vitalsync-auth-profile",
+    "name": "VitalSync - Auth & Profile APIs",
+    "description": "Complete collection of authentication, profile management, password management, health goals, and reminders APIs for VitalSync mobile app backend.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "1. Sign Up (Register)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Alex Morgan\",\n  \"email\": \"alex.morgan@email.com\",\n  \"password\": \"password123\",\n  \"confirm_password\": \"password123\"\n}"
+            },
+            "url": {
+              "raw": "http://localhost/vitalsync_background/auth/signup.php",
+              "protocol": "http",
+              "host": ["localhost"],
+              "path": ["vitalsync_background", "auth", "signup.php"]
+            }
+          }
+        },
+        {
+          "name": "2. Log In",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"password\": \"password123\",\n  \"device_name\": \"Pixel 7 Pro\"\n}"
+            },
+            "url": {
+              "raw": "http://localhost/vitalsync_background/auth/login.php",
+              "protocol": "http",
+              "host": ["localhost"],
+              "path": ["vitalsync_background", "auth", "login.php"]
+            }
+          }
+        },
+        {
+          "name": "3. Forgot / Reset Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"new_password\": \"newpassword123\",\n  \"confirm_password\": \"newpassword123\"\n}"
+            },
+            "url": {
+              "raw": "http://localhost/vitalsync_background/auth/reset_password.php",
+              "protocol": "http",
+              "host": ["localhost"],
+              "path": ["vitalsync_background", "auth", "reset_password.php"]
+            }
+          }
+        },
+        {
+          "name": "4. Change Password (Logged-in)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"current_password\": \"newpassword123\",\n  \"new_password\": \"myNewSecurePass456\",\n  \"confirm_password\": \"myNewSecurePass456\"\n}"
+            },
+            "url": {
+              "raw": "http://localhost/vitalsync_background/auth/change_password.php",
+              "protocol": "http",
+              "host": ["localhost"],
+              "path": ["vitalsync_background", "auth", "change_password.php"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Profile",
+      "item": [
+        {
+          "name": "1. Get Profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost/vitalsync_background/auth/profile.php?email=alex.morgan@email.com",
+              "protocol": "http",
+              "host": ["localhost"],
+              "path": ["vitalsync_background", "auth", "profile.php"],
+              "query": [
+                {
+                  "key": "email",
+                  "value": "alex.morgan@email.com"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "2. Update Profile / Personal Information",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"name\": \"Alex Morgan\",\n  \"phone\": \"+1 (202) 555-0147\",\n  \"dob\": \"14 May 1996\",\n  \"gender\": \"Male\",\n  \"height\": 175.0,\n  \"weight\": 68.5,\n  \"activity_level\": \"Moderately active\",\n  \"primary_goal\": \"Improve Fitness\"\n}"
+            },
+            "url": {
+              "raw": "http://localhost/vitalsync_background/auth/profile.php",
+              "protocol": "http",
+              "host": ["localhost"],
+              "path": ["vitalsync_background", "auth", "profile.php"]
+            }
+          }
+        },
+        {
+          "name": "3. Upload Profile Picture",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "email",
+                  "value": "alex.morgan@email.com",
+                  "type": "text"
+                },
+                {
+                  "key": "profile_image",
+                  "type": "file",
+                  "description": "Choose JPG, PNG, or WEBP image file"
+                }
+              ]
+            },
+            "url": {
+              "raw": "http://localhost/vitalsync_background/auth/upload_profile.php",
+              "protocol": "http",
+              "host": ["localhost"],
+              "path": ["vitalsync_background", "auth", "upload_profile.php"]
+            }
+          }
+        },
+        {
+          "name": "4. Get Health Goals",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost/vitalsync_background/auth/health_goals.php?email=alex.morgan@email.com",
+              "protocol": "http",
+              "host": ["localhost"],
+              "path": ["vitalsync_background", "auth", "health_goals.php"],
+              "query": [
+                {
+                  "key": "email",
+                  "value": "alex.morgan@email.com"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "5. Update Health Goal",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"goal_id\": \"1\"\n}"
+            },
+            "url": {
+              "raw": "http://localhost/vitalsync_background/auth/health_goals.php",
+              "protocol": "http",
+              "host": ["localhost"],
+              "path": ["vitalsync_background", "auth", "health_goals.php"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reminders & Sessions",
+      "item": [
+        {
+          "name": "1. Get Reminders",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost/vitalsync_background/auth/reminders.php?email=alex.morgan@email.com",
+              "protocol": "http",
+              "host": ["localhost"],
+              "path": ["vitalsync_background", "auth", "reminders.php"],
+              "query": [
+                {
+                  "key": "email",
+                  "value": "alex.morgan@email.com"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "2. Add New Reminder",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"title\": \"Evening Meditation\",\n  \"time\": \"09:00 PM\",\n  \"frequency\": \"Every day\",\n  \"repeat_days\": \"0,1,2,3,4,5,6\",\n  \"sound_vibration\": true,\n  \"is_enabled\": true\n}"
+            },
+            "url": {
+              "raw": "http://localhost/vitalsync_background/auth/reminders.php",
+              "protocol": "http",
+              "host": ["localhost"],
+              "path": ["vitalsync_background", "auth", "reminders.php"]
+            }
+          }
+        },
+        {
+          "name": "3. Toggle / Update Reminder",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": 1,\n  \"is_enabled\": false\n}"
+            },
+            "url": {
+              "raw": "http://localhost/vitalsync_background/auth/reminders.php",
+              "protocol": "http",
+              "host": ["localhost"],
+              "path": ["vitalsync_background", "auth", "reminders.php"]
+            }
+          }
+        },
+        {
+          "name": "4. Delete Reminder",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "http://localhost/vitalsync_background/auth/reminders.php?id=1",
+              "protocol": "http",
+              "host": ["localhost"],
+              "path": ["vitalsync_background", "auth", "reminders.php"],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "1"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "5. Get Active Login Sessions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost/vitalsync_background/auth/login_sessions.php?email=alex.morgan@email.com",
+              "protocol": "http",
+              "host": ["localhost"],
+              "path": ["vitalsync_background", "auth", "login_sessions.php"],
+              "query": [
+                {
+                  "key": "email",
+                  "value": "alex.morgan@email.com"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "6. Log Out Other Sessions",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"action\": \"logout_others\"\n}"
+            },
+            "url": {
+              "raw": "http://localhost/vitalsync_background/auth/login_sessions.php",
+              "protocol": "http",
+              "host": ["localhost"],
+              "path": ["vitalsync_background", "auth", "login_sessions.php"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
+

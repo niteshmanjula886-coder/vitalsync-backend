@@ -1,6 +1,14 @@
-
 <?php
+
 header("Content-Type: application/json; charset=UTF-8");
+header("Access-Control-Allow-Origin: *");
+header("Access-Control-Allow-Methods: POST, OPTIONS");
+header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
+
+if ($_SERVER["REQUEST_METHOD"] === "OPTIONS") {
+    http_response_code(200);
+    exit;
+}
 
 require_once __DIR__ . "/../config/db.php";
 
@@ -18,13 +26,14 @@ if ($_SERVER["REQUEST_METHOD"] !== "POST") {
     ]);
 }
 
-// Get the registered user's email
-$email = strtolower(trim($_POST["email"] ?? ""));
+// User identifier: email or user_id
+$email = strtolower(trim($_POST["email"] ?? $_GET["email"] ?? ""));
+$userId = isset($_POST["user_id"]) ? (int)$_POST["user_id"] : (isset($_GET["user_id"]) ? (int)$_GET["user_id"] : 0);
 
-if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+if ($userId <= 0 && $email === "") {
     respond(400, [
         "success" => false,
-        "message" => "Enter a valid email"
+        "message" => "Please provide user_id or email to attach the profile image"
     ]);
 }
 
@@ -32,7 +41,7 @@ if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
 if (!isset($_FILES["profile_image"])) {
     respond(400, [
         "success" => false,
-        "message" => "Please select a profile image"
+        "message" => "Please select an image file under form key 'profile_image'"
     ]);
 }
 
@@ -41,7 +50,7 @@ $file = $_FILES["profile_image"];
 if ($file["error"] !== UPLOAD_ERR_OK) {
     respond(400, [
         "success" => false,
-        "message" => "Image upload failed"
+        "message" => "Image upload failed with error code: " . $file["error"]
     ]);
 }
 
@@ -54,8 +63,7 @@ if ($file["size"] > 5 * 1024 * 1024) {
 }
 
 // Validate actual image type
-$imageInfo = getimagesize($file["tmp_name"]);
-
+$imageInfo = @getimagesize($file["tmp_name"]);
 if ($imageInfo === false) {
     respond(400, [
         "success" => false,
@@ -70,7 +78,6 @@ $allowedTypes = [
 ];
 
 $imageType = $imageInfo[2];
-
 if (!isset($allowedTypes[$imageType])) {
     respond(400, [
         "success" => false,
@@ -78,19 +85,22 @@ if (!isset($allowedTypes[$imageType])) {
     ]);
 }
 
-// Check whether user exists
-$stmt = $conn->prepare(
-    "SELECT id FROM users WHERE email = ? LIMIT 1"
-);
+// Find user in database
+if ($userId > 0) {
+    $stmt = $conn->prepare("SELECT id, profile_image FROM users WHERE id = ? LIMIT 1");
+    $stmt->bind_param("i", $userId);
+} else {
+    $stmt = $conn->prepare("SELECT id, profile_image FROM users WHERE email = ? LIMIT 1");
+    $stmt->bind_param("s", $email);
+}
 
 if (!$stmt) {
     respond(500, [
         "success" => false,
-        "message" => "Database query failed"
+        "message" => "Database query failed: " . $conn->error
     ]);
 }
 
-$stmt->bind_param("s", $email);
 $stmt->execute();
 $result = $stmt->get_result();
 $user = $result->fetch_assoc();
@@ -99,71 +109,78 @@ $stmt->close();
 if (!$user) {
     respond(404, [
         "success" => false,
-        "message" => "User not found"
+        "message" => "User account not found"
     ]);
 }
 
 // Create upload directory if needed
 $uploadDir = __DIR__ . "/../uploads/profiles/";
-
 if (!is_dir($uploadDir)) {
     if (!mkdir($uploadDir, 0755, true)) {
         respond(500, [
             "success" => false,
-            "message" => "Could not create upload directory"
+            "message" => "Could not create upload directory on server"
         ]);
     }
 }
 
-// Generate a unique filename
-$filename = "user_" . $user["id"] . "_" .
-            bin2hex(random_bytes(8)) . "." .
-            $allowedTypes[$imageType];
-
+// Generate unique filename
+$targetUserId = (int)$user["id"];
+$extension = $allowedTypes[$imageType];
+$filename = "user_" . $targetUserId . "_" . bin2hex(random_bytes(8)) . "." . $extension;
 $destination = $uploadDir . $filename;
 
 // Move uploaded image
 if (!move_uploaded_file($file["tmp_name"], $destination)) {
     respond(500, [
         "success" => false,
-        "message" => "Could not save profile image"
+        "message" => "Could not save profile image to disk"
     ]);
 }
 
-// Store relative image path in database
 $imagePath = "uploads/profiles/" . $filename;
 
-$stmt = $conn->prepare(
-    "UPDATE users SET profile_image = ? WHERE id = ?"
-);
+// Delete old profile picture if present
+if (!empty($user["profile_image"])) {
+    $oldFilePath = __DIR__ . "/../" . $user["profile_image"];
+    if (file_exists($oldFilePath) && is_file($oldFilePath)) {
+        @unlink($oldFilePath);
+    }
+}
 
-if (!$stmt) {
+// Update database record
+$updateStmt = $conn->prepare("UPDATE users SET profile_image = ? WHERE id = ?");
+if (!$updateStmt) {
     @unlink($destination);
     respond(500, [
         "success" => false,
-        "message" => "Could not prepare database update"
+        "message" => "Could not prepare database update: " . $conn->error
     ]);
 }
 
-$stmt->bind_param("si", $imagePath, $user["id"]);
+$updateStmt->bind_param("si", $imagePath, $targetUserId);
 
-if (!$stmt->execute()) {
+if (!$updateStmt->execute()) {
     @unlink($destination);
-    $stmt->close();
-
+    $updateStmt->close();
     respond(500, [
         "success" => false,
-        "message" => "Could not update profile image"
+        "message" => "Could not update profile image in database"
     ]);
 }
 
-$stmt->close();
+$updateStmt->close();
 $conn->close();
+
+// Build URL
+$scheme = (!empty($_SERVER["HTTPS"]) && $_SERVER["HTTPS"] !== "off") ? "https" : "http";
+$host = $_SERVER["HTTP_HOST"] ?? "localhost";
+$fullImageUrl = $scheme . "://" . $host . "/vitalsync_background/" . $imagePath;
 
 respond(200, [
     "success" => true,
     "message" => "Profile photo uploaded successfully",
+    "user_id" => $targetUserId,
     "profile_image" => $imagePath,
-    "image_url" => "http://localhost/vitalsync_background/" . $imagePath
+    "image_url" => $fullImageUrl
 ]);
-?>

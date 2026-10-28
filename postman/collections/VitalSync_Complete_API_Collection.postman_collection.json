@@ -1,0 +1,1564 @@
+{
+    "info": {
+        "_postman_id": "vitalsync-full-api-collection-v2",
+        "name": "VitalSync Complete Backend APIs",
+        "description": "Production-ready API collection covering all VitalSync Android application modules: Auth, Profile, Vitals, Activity, Sleep, Hydration, Gym Workouts, Nutrition, AI Health Assistant, and Settings.",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+        {
+            "name": "1. Authentication",
+            "item": [
+                {
+                    "name": "Sign Up (Register)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"name\": \"Alex Morgan\",\n  \"email\": \"alex.morgan@email.com\",\n  \"password\": \"password123\",\n  \"confirm_password\": \"password123\"\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/auth/signup.php",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "auth",
+                                "signup.php"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Log In",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"password\": \"password123\",\n  \"device_name\": \"Pixel 7 Pro\"\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/auth/login.php",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "auth",
+                                "login.php"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Forgot / Reset Password",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"new_password\": \"newpassword123\",\n  \"confirm_password\": \"newpassword123\"\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/auth/reset_password.php",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "auth",
+                                "reset_password.php"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Change Password (Settings)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"current_password\": \"newpassword123\",\n  \"new_password\": \"password123\",\n  \"confirm_password\": \"password123\"\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/auth/change_password.php",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "auth",
+                                "change_password.php"
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "2. Profile & Account",
+            "item": [
+                {
+                    "name": "Get User Profile",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/auth/profile.php?email=alex.morgan@email.com",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "auth",
+                                "profile.php"
+                            ],
+                            "query": [
+                                {
+                                    "key": "email",
+                                    "value": "alex.morgan@email.com"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Update Profile / Personal Information",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"name\": \"Alex Morgan\",\n  \"phone\": \"+1 (202) 555-0147\",\n  \"dob\": \"14 May 1996\",\n  \"gender\": \"Male\",\n  \"height\": 175.0,\n  \"weight\": 68.5,\n  \"activity_level\": \"Moderately active\",\n  \"primary_goal\": \"Improve Fitness\"\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/auth/profile.php",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "auth",
+                                "profile.php"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Upload Profile Photo",
+                    "request": {
+                        "method": "POST",
+                        "header": [],
+                        "body": {
+                            "mode": "formdata",
+                            "formdata": [
+                                {
+                                    "key": "email",
+                                    "value": "alex.morgan@email.com",
+                                    "type": "text"
+                                },
+                                {
+                                    "key": "profile_image",
+                                    "type": "file",
+                                    "description": "Choose JPG, PNG, or WEBP image"
+                                }
+                            ]
+                        },
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/auth/upload_profile.php",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "auth",
+                                "upload_profile.php"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get Health Goals",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/auth/health_goals.php?email=alex.morgan@email.com",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "auth",
+                                "health_goals.php"
+                            ],
+                            "query": [
+                                {
+                                    "key": "email",
+                                    "value": "alex.morgan@email.com"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Update Health Goal",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"goal_id\": \"1\"\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/auth/health_goals.php",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "auth",
+                                "health_goals.php"
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "3. Vitals & Biometrics",
+            "item": [
+                {
+                    "name": "Vitals Dashboard Summary",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/vitals/summary.php?email=alex.morgan@email.com",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "vitals",
+                                "summary.php"
+                            ],
+                            "query": [
+                                {
+                                    "key": "email",
+                                    "value": "alex.morgan@email.com"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get All Vitals Readings",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/vitals/readings.php?email=alex.morgan@email.com&limit=30",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "vitals",
+                                "readings.php"
+                            ],
+                            "query": [
+                                {
+                                    "key": "email",
+                                    "value": "alex.morgan@email.com"
+                                },
+                                {
+                                    "key": "limit",
+                                    "value": "30"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Add Vital Reading (AddReadingScreen)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"reading_type\": \"heart_rate\",\n  \"value_numeric\": 76,\n  \"source\": \"Manual Entry\",\n  \"notes\": \"Resting morning check\"\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/vitals/readings.php",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "vitals",
+                                "readings.php"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get Heart Rate Detail & Chart",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/vitals/heart_rate.php?email=alex.morgan@email.com",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "vitals",
+                                "heart_rate.php"
+                            ],
+                            "query": [
+                                {
+                                    "key": "email",
+                                    "value": "alex.morgan@email.com"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Log Heart Rate",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"bpm\": 78,\n  \"source\": \"VitalSync Watch\"\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/vitals/heart_rate.php",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "vitals",
+                                "heart_rate.php"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get Blood Pressure Detail",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/vitals/blood_pressure.php?email=alex.morgan@email.com",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "vitals",
+                                "blood_pressure.php"
+                            ],
+                            "query": [
+                                {
+                                    "key": "email",
+                                    "value": "alex.morgan@email.com"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Log Blood Pressure",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"systolic\": 120,\n  \"diastolic\": 80,\n  \"source\": \"Manual Entry\"\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/vitals/blood_pressure.php",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "vitals",
+                                "blood_pressure.php"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get SpO2 Detail",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/vitals/spo2.php?email=alex.morgan@email.com",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "vitals",
+                                "spo2.php"
+                            ],
+                            "query": [
+                                {
+                                    "key": "email",
+                                    "value": "alex.morgan@email.com"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Log SpO2 Reading",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"percentage\": 98,\n  \"source\": \"VitalSync Watch\"\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/vitals/spo2.php",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "vitals",
+                                "spo2.php"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get BMI & Body Metrics",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/vitals/bmi.php?email=alex.morgan@email.com",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "vitals",
+                                "bmi.php"
+                            ],
+                            "query": [
+                                {
+                                    "key": "email",
+                                    "value": "alex.morgan@email.com"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Update Height/Weight & Recalculate BMI",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"height\": 175.0,\n  \"weight\": 68.5\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/vitals/bmi.php",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "vitals",
+                                "bmi.php"
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "4. Activity & Tracking",
+            "item": [
+                {
+                    "name": "Daily Activity Summary",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/activity/summary.php?email=alex.morgan@email.com",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "activity",
+                                "summary.php"
+                            ],
+                            "query": [
+                                {
+                                    "key": "email",
+                                    "value": "alex.morgan@email.com"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get Step Goal",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/activity/step_goal.php?email=alex.morgan@email.com",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "activity",
+                                "step_goal.php"
+                            ],
+                            "query": [
+                                {
+                                    "key": "email",
+                                    "value": "alex.morgan@email.com"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Edit Step Goal",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"step_goal\": 10000\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/activity/step_goal.php",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "activity",
+                                "step_goal.php"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get Activity Sessions",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/activity/tracking.php?email=alex.morgan@email.com",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "activity",
+                                "tracking.php"
+                            ],
+                            "query": [
+                                {
+                                    "key": "email",
+                                    "value": "alex.morgan@email.com"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Save Activity Session (Walking/Running/Cycling)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"activity_type\": \"RUNNING\",\n  \"duration_seconds\": 1800,\n  \"distance_km\": 4.2,\n  \"calories_burned\": 320,\n  \"avg_pace\": \"5:15 min/km\",\n  \"avg_heart_rate\": 148,\n  \"steps\": 4850\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/activity/tracking.php",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "activity",
+                                "tracking.php"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "View Health & Activity History",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/activity/history.php?email=alex.morgan@email.com",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "activity",
+                                "history.php"
+                            ],
+                            "query": [
+                                {
+                                    "key": "email",
+                                    "value": "alex.morgan@email.com"
+                                }
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "5. Sleep Tracking",
+            "item": [
+                {
+                    "name": "Get Sleep Overview & Stages",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/sleep/sleep.php?email=alex.morgan@email.com",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "sleep",
+                                "sleep.php"
+                            ],
+                            "query": [
+                                {
+                                    "key": "email",
+                                    "value": "alex.morgan@email.com"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Log Sleep Session",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"duration_minutes\": 452,\n  \"sleep_score\": 80,\n  \"quality_label\": \"Restful\",\n  \"bedtime\": \"10:30 PM\",\n  \"wake_time\": \"06:15 AM\",\n  \"deep_sleep_minutes\": 95,\n  \"light_sleep_minutes\": 250,\n  \"rem_sleep_minutes\": 85,\n  \"awake_minutes\": 22\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/sleep/sleep.php",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "sleep",
+                                "sleep.php"
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "6. Hydration Tracking",
+            "item": [
+                {
+                    "name": "Get Today Hydration & Progress",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/hydration/hydration.php?email=alex.morgan@email.com",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "hydration",
+                                "hydration.php"
+                            ],
+                            "query": [
+                                {
+                                    "key": "email",
+                                    "value": "alex.morgan@email.com"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Log Water Intake (+250 ml)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"amount_ml\": 250\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/hydration/hydration.php",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "hydration",
+                                "hydration.php"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Update Hydration Target & Reminder",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"target_ml\": 2500,\n  \"reminders_enabled\": true\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/hydration/hydration.php",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "hydration",
+                                "hydration.php"
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "7. Gym & Workouts",
+            "item": [
+                {
+                    "name": "Get Exercise Library",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/gym/exercises.php?email=alex.morgan@email.com",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "gym",
+                                "exercises.php"
+                            ],
+                            "query": [
+                                {
+                                    "key": "email",
+                                    "value": "alex.morgan@email.com"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Add Custom Exercise",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"name\": \"Dumbbell Bulgarian Split Squat\",\n  \"target_muscle\": \"Quadriceps & Glutes\",\n  \"default_weight_kg\": 16.0,\n  \"default_reps\": 10,\n  \"notes\": \"Rear foot elevated, upright posture\"\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/gym/exercises.php",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "gym",
+                                "exercises.php"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get Workout Splits",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/gym/splits.php",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "gym",
+                                "splits.php"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get Workout Sessions History",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/gym/sessions.php?email=alex.morgan@email.com",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "gym",
+                                "sessions.php"
+                            ],
+                            "query": [
+                                {
+                                    "key": "email",
+                                    "value": "alex.morgan@email.com"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Save Active Workout Session",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"name\": \"Push Day Workout\",\n  \"split\": \"PUSH\",\n  \"durationMinutes\": 55,\n  \"totalVolumeKg\": 3800.0,\n  \"estimatedCaloriesBurned\": 320,\n  \"exercises\": [\n    {\n      \"exercise\": {\n        \"name\": \"Barbell Bench Press\",\n        \"targetMuscle\": \"Chest\"\n      },\n      \"sets\": [\n        {\"setNumber\": 1, \"reps\": 10, \"weightKg\": 60.0, \"isCompleted\": true},\n        {\"setNumber\": 2, \"reps\": 10, \"weightKg\": 65.0, \"isCompleted\": true},\n        {\"setNumber\": 3, \"reps\": 8, \"weightKg\": 70.0, \"isCompleted\": true}\n      ]\n    }\n  ]\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/gym/sessions.php",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "gym",
+                                "sessions.php"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get Gym Progress Analytics",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/gym/progress.php?email=alex.morgan@email.com",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "gym",
+                                "progress.php"
+                            ],
+                            "query": [
+                                {
+                                    "key": "email",
+                                    "value": "alex.morgan@email.com"
+                                }
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "8. Nutrition & Meals",
+            "item": [
+                {
+                    "name": "Get Food Database (Search & Filter)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/nutrition/foods.php?email=alex.morgan@email.com&q=Paneer",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "nutrition",
+                                "foods.php"
+                            ],
+                            "query": [
+                                {
+                                    "key": "email",
+                                    "value": "alex.morgan@email.com"
+                                },
+                                {
+                                    "key": "q",
+                                    "value": "Paneer"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Add Custom Food Item",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"name\": \"Homemade Oats Porridge with Almonds\",\n  \"category\": \"VEG\",\n  \"servingSizeAmount\": 150.0,\n  \"servingUnit\": \"1 bowl (150g)\",\n  \"calories\": 240,\n  \"proteinGrams\": 9.5,\n  \"carbsGrams\": 38.0,\n  \"fatGrams\": 5.5\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/nutrition/foods.php",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "nutrition",
+                                "foods.php"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get Daily Meals for Date",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/nutrition/meals.php?email=alex.morgan@email.com",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "nutrition",
+                                "meals.php"
+                            ],
+                            "query": [
+                                {
+                                    "key": "email",
+                                    "value": "alex.morgan@email.com"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Log Meal Entry",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"category\": \"BREAKFAST\",\n  \"foodId\": \"f1\",\n  \"quantity\": 1.0\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/nutrition/meals.php",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "nutrition",
+                                "meals.php"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get Nutrition Goals",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/nutrition/goals.php?email=alex.morgan@email.com",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "nutrition",
+                                "goals.php"
+                            ],
+                            "query": [
+                                {
+                                    "key": "email",
+                                    "value": "alex.morgan@email.com"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Update Nutrition Goals",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"dailyCalorieTarget\": 2200,\n  \"dailyProteinTarget\": 130.0,\n  \"dailyCarbsTarget\": 250.0,\n  \"dailyFatTarget\": 65.0,\n  \"fitnessGoal\": \"MUSCLE_GAIN\",\n  \"dietaryPreference\": \"NON_VEGETARIAN\"\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/nutrition/goals.php",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "nutrition",
+                                "goals.php"
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "9. AI Health Assistant",
+            "item": [
+                {
+                    "name": "Get AI Chat History",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/ai/chat.php?email=alex.morgan@email.com",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "ai",
+                                "chat.php"
+                            ],
+                            "query": [
+                                {
+                                    "key": "email",
+                                    "value": "alex.morgan@email.com"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Send Message to AI Assistant",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"message\": \"What should my post-workout meal look like today?\"\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/ai/chat.php",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "ai",
+                                "chat.php"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get Weekly Health Report",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/ai/report.php?email=alex.morgan@email.com",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "ai",
+                                "report.php"
+                            ],
+                            "query": [
+                                {
+                                    "key": "email",
+                                    "value": "alex.morgan@email.com"
+                                }
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "10. Settings, Reminders & Devices",
+            "item": [
+                {
+                    "name": "Get Reminders List",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/auth/reminders.php?email=alex.morgan@email.com",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "auth",
+                                "reminders.php"
+                            ],
+                            "query": [
+                                {
+                                    "key": "email",
+                                    "value": "alex.morgan@email.com"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Add / Update Reminder",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"title\": \"Evening Meditation\",\n  \"time\": \"09:00 PM\",\n  \"frequency\": \"Every day\",\n  \"repeat_days\": \"0,1,2,3,4,5,6\",\n  \"sound_vibration\": true,\n  \"is_enabled\": true\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/auth/reminders.php",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "auth",
+                                "reminders.php"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get Connected Devices",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/settings/devices.php?email=alex.morgan@email.com",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "settings",
+                                "devices.php"
+                            ],
+                            "query": [
+                                {
+                                    "key": "email",
+                                    "value": "alex.morgan@email.com"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Pair New Device",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"device_name\": \"VitalSync Smart Scale\",\n  \"device_type\": \"Bluetooth Scale\",\n  \"battery_level\": 95,\n  \"is_connected\": true\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/settings/devices.php",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "settings",
+                                "devices.php"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get Notifications",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/settings/notifications.php?email=alex.morgan@email.com",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "settings",
+                                "notifications.php"
+                            ],
+                            "query": [
+                                {
+                                    "key": "email",
+                                    "value": "alex.morgan@email.com"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Mark All Notifications Read",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"action\": \"mark_all_read\"\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/settings/notifications.php",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "settings",
+                                "notifications.php"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get Health Permissions",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/settings/permissions.php?email=alex.morgan@email.com",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "settings",
+                                "permissions.php"
+                            ],
+                            "query": [
+                                {
+                                    "key": "email",
+                                    "value": "alex.morgan@email.com"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Update Health Permissions",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"vital_signs\": true,\n  \"activity\": true,\n  \"sleep\": true,\n  \"hydration\": true,\n  \"write_health_data\": true\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/settings/permissions.php",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "settings",
+                                "permissions.php"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get Storage & Backup Info",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/settings/data_management.php?email=alex.morgan@email.com",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "settings",
+                                "data_management.php"
+                            ],
+                            "query": [
+                                {
+                                    "key": "email",
+                                    "value": "alex.morgan@email.com"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Export Health Data Archive",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"alex.morgan@email.com\",\n  \"action\": \"export\"\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost/vitalsync_background/settings/data_management.php",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "path": [
+                                "vitalsync_background",
+                                "settings",
+                                "data_management.php"
+                            ]
+                        }
+                    }
+                }
+            ]
+        }
+    ],
+    "variable": [
+        {
+            "key": "baseUrl",
+            "value": "http://localhost/vitalsync_background",
+            "type": "string"
+        },
+        {
+            "key": "userEmail",
+            "value": "alex.morgan@email.com",
+            "type": "string"
+        }
+    ]
+}
