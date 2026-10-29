@@ -88,7 +88,7 @@ if ($method === "POST") {
         "INSERT INTO activity_sessions (user_id, activity_type, duration_seconds, distance_km, calories_burned, avg_pace, avg_heart_rate, steps, start_time, end_time)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     );
-    $stmt->bind_param("isidisssis", $userId, $type, $duration, $distance, $calories, $pace, $avgHr, $steps, $startTime, $endTime);
+    $stmt->bind_param("isidisiiss", $userId, $type, $duration, $distance, $calories, $pace, $avgHr, $steps, $startTime, $endTime);
 
     if ($stmt->execute()) {
         $newId = $stmt->insert_id;

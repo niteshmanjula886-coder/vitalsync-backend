@@ -36,8 +36,15 @@ function resolveUserIdOrDie($conn, $allowGuestFallback = false) {
     $email = "";
 
     // 1. Check Authorization Bearer header
-    $headers = getallheaders();
-    $authHeader = $headers["Authorization"] ?? $headers["authorization"] ?? "";
+    $authHeader = "";
+    if (!empty($_SERVER["HTTP_AUTHORIZATION"])) {
+        $authHeader = $_SERVER["HTTP_AUTHORIZATION"];
+    } elseif (!empty($_SERVER["REDIRECT_HTTP_AUTHORIZATION"])) {
+        $authHeader = $_SERVER["REDIRECT_HTTP_AUTHORIZATION"];
+    } elseif (function_exists("getallheaders")) {
+        $headers = getallheaders();
+        $authHeader = $headers["Authorization"] ?? $headers["authorization"] ?? "";
+    }
     if (preg_match('/Bearer\s+(\S+)/i', $authHeader, $matches)) {
         $token = trim($matches[1]);
         if (is_numeric($token)) {
