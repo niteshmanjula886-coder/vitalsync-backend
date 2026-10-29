@@ -20,7 +20,12 @@ function respondJson($statusCode, $data) {
 
 function getInputData() {
     $raw = file_get_contents("php://input");
-    $data = json_decode($raw, true);
+    if ($raw !== false && $raw !== null) {
+        // Strip UTF-8 BOM if present
+        $raw = preg_replace('/^\xEF\xBB\xBF/', '', $raw);
+        $raw = trim($raw);
+    }
+    $data = !empty($raw) ? json_decode($raw, true) : null;
     if (!is_array($data)) {
         $data = $_POST;
     }
@@ -58,8 +63,6 @@ function resolveUserIdOrDie($conn, $allowGuestFallback = false) {
     if ($userId <= 0 && $email === "") {
         if (isset($_GET["user_id"]) && is_numeric($_GET["user_id"])) {
             $userId = (int)$_GET["user_id"];
-        } elseif (isset($_GET["id"]) && is_numeric($_GET["id"])) {
-            $userId = (int)$_GET["id"];
         } elseif (isset($_GET["email"]) && filter_var($_GET["email"], FILTER_VALIDATE_EMAIL)) {
             $email = strtolower(trim($_GET["email"]));
         }
@@ -70,8 +73,6 @@ function resolveUserIdOrDie($conn, $allowGuestFallback = false) {
         $data = getInputData();
         if (isset($data["user_id"]) && is_numeric($data["user_id"])) {
             $userId = (int)$data["user_id"];
-        } elseif (isset($data["id"]) && is_numeric($data["id"])) {
-            $userId = (int)$data["id"];
         } elseif (isset($data["email"]) && filter_var($data["email"], FILTER_VALIDATE_EMAIL)) {
             $email = strtolower(trim($data["email"]));
         }

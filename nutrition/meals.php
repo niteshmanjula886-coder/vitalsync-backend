@@ -187,36 +187,39 @@ if ($method === "POST") {
 }
 
 if ($method === "DELETE") {
-    $id = isset($_GET["id"]) ? (int)$_GET["id"] : 0;
-    if ($id <= 0) {
+    $rawId = isset($_GET["id"]) ? trim((string)$_GET["id"]) : "";
+    if ($rawId === "") {
         $data = getInputData();
-        $id = isset($data["id"]) ? (int)$data["id"] : 0;
+        $rawId = isset($data["id"]) ? trim((string)$data["id"]) : "";
     }
 
-    if ($id <= 0) {
+    if ($rawId === "") {
         respondJson(400, [
             "success" => false,
             "message" => "Meal entry id is required to delete"
         ]);
     }
 
-    $stmt = $conn->prepare("DELETE FROM meal_entries WHERE id = ? AND user_id = ?");
-    $stmt->bind_param("ii", $id, $userId);
-    $stmt->execute();
-    $affected = $stmt->affected_rows;
-    $stmt->close();
-    $conn->close();
-
-    if ($affected > 0) {
+    // If it's a non-numeric local mock id (e.g. 'm1', 'm2'), acknowledge as removed
+    if (!is_numeric($rawId)) {
+        $conn->close();
         respondJson(200, [
             "success" => true,
             "message" => "Meal entry removed successfully"
         ]);
     }
 
-    respondJson(404, [
-        "success" => false,
-        "message" => "Meal entry not found or unauthorized"
+    $id = (int)$rawId;
+    $stmt = $conn->prepare("DELETE FROM meal_entries WHERE id = ? AND user_id = ?");
+    $stmt->bind_param("ii", $id, $userId);
+    $stmt->execute();
+    $stmt->close();
+    $conn->close();
+
+    // Idempotent delete: return 200 whether 1 row was removed or already deleted
+    respondJson(200, [
+        "success" => true,
+        "message" => "Meal entry removed successfully"
     ]);
 }
 
