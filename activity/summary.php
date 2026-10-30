@@ -33,10 +33,9 @@ $agg = $aggStmt->get_result()->fetch_assoc();
 $aggStmt->close();
 
 $steps = (int)$agg["total_steps"];
-if ($steps === 0) $steps = 6245; // default fallback matching UI sample
-$distance = (float)$agg["total_distance"] > 0 ? (float)$agg["total_distance"] : round($steps * 0.00075, 2);
-$calories = (int)$agg["total_calories"] > 0 ? (int)$agg["total_calories"] : (int)($steps * 0.04);
-$activeMinutes = (intdiv($agg["total_seconds"], 60) > 0) ? intdiv($agg["total_seconds"], 60) : 48;
+$distance = (float)$agg["total_distance"];
+$calories = (int)$agg["total_calories"];
+$activeMinutes = intdiv($agg["total_seconds"], 60);
 
 $conn->close();
 

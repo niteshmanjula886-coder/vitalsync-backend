@@ -11,9 +11,11 @@ $uStmt->execute();
 $userProfile = $uStmt->get_result()->fetch_assoc();
 $uStmt->close();
 
-$height = $userProfile["height"] ? (float)$userProfile["height"] : 175.0;
-$weight = $userProfile["weight"] ? (float)$userProfile["weight"] : 68.5;
-$bmi = ($height > 0) ? round($weight / (($height / 100) * ($height / 100)), 1) : 22.4;
+$height = ($userProfile && $userProfile["height"] !== null) ? (float)$userProfile["height"] : 0.0;
+$weight = ($userProfile && $userProfile["weight"] !== null) ? (float)$userProfile["weight"] : 0.0;
+$hasValidBmi = ($height > 0 && $weight > 0);
+$bmi = $hasValidBmi ? round($weight / (($height / 100) * ($height / 100)), 1) : 0.0;
+$bmiCategory = $hasValidBmi ? (($bmi < 18.5) ? "Underweight" : (($bmi <= 24.9) ? "Healthy Range" : (($bmi <= 29.9) ? "Overweight" : "Obese"))) : "Not set";
 
 // Latest Heart Rate
 $hrStmt = $conn->prepare(
@@ -27,14 +29,27 @@ $hrStmt->execute();
 $hrRow = $hrStmt->get_result()->fetch_assoc();
 $hrStmt->close();
 
-$heartRate = [
-    "bpm" => $hrRow ? (int)$hrRow["value_numeric"] : 76,
-    "status" => $hrRow ? $hrRow["status_label"] : "Normal",
-    "resting_bpm" => 64,
-    "min_bpm" => 58,
-    "max_bpm" => 124,
-    "recorded_at" => $hrRow ? $hrRow["recorded_at"] : date("Y-m-d 09:00:00")
-];
+if ($hrRow) {
+    $heartRate = [
+        "bpm" => (int)$hrRow["value_numeric"],
+        "status" => $hrRow["status_label"] ?: "Normal",
+        "resting_bpm" => 0,
+        "min_bpm" => 0,
+        "max_bpm" => 0,
+        "recorded_at" => $hrRow["recorded_at"],
+        "has_data" => true
+    ];
+} else {
+    $heartRate = [
+        "bpm" => 0,
+        "status" => "No readings yet",
+        "resting_bpm" => 0,
+        "min_bpm" => 0,
+        "max_bpm" => 0,
+        "recorded_at" => "",
+        "has_data" => false
+    ];
+}
 
 // Latest Blood Pressure
 $bpStmt = $conn->prepare(
@@ -48,13 +63,25 @@ $bpStmt->execute();
 $bpRow = $bpStmt->get_result()->fetch_assoc();
 $bpStmt->close();
 
-$bloodPressure = [
-    "systolic" => $bpRow ? (int)$bpRow["systolic"] : 120,
-    "diastolic" => $bpRow ? (int)$bpRow["diastolic"] : 80,
-    "text" => $bpRow ? $bpRow["value_text"] : "120/80 mmHg",
-    "status" => $bpRow ? $bpRow["status_label"] : "Normal",
-    "recorded_at" => $bpRow ? $bpRow["recorded_at"] : date("Y-m-d 09:30:00")
-];
+if ($bpRow) {
+    $bloodPressure = [
+        "systolic" => (int)$bpRow["systolic"],
+        "diastolic" => (int)$bpRow["diastolic"],
+        "text" => $bpRow["value_text"] ?: ($bpRow["systolic"] . "/" . $bpRow["diastolic"] . " mmHg"),
+        "status" => $bpRow["status_label"] ?: "Normal",
+        "recorded_at" => $bpRow["recorded_at"],
+        "has_data" => true
+    ];
+} else {
+    $bloodPressure = [
+        "systolic" => 0,
+        "diastolic" => 0,
+        "text" => "--/-- mmHg",
+        "status" => "No readings yet",
+        "recorded_at" => "",
+        "has_data" => false
+    ];
+}
 
 // Latest SpO2
 $spo2Stmt = $conn->prepare(
@@ -68,11 +95,21 @@ $spo2Stmt->execute();
 $spo2Row = $spo2Stmt->get_result()->fetch_assoc();
 $spo2Stmt->close();
 
-$spo2 = [
-    "percentage" => $spo2Row ? (int)$spo2Row["value_numeric"] : 98,
-    "status" => $spo2Row ? $spo2Row["status_label"] : "Optimal",
-    "recorded_at" => $spo2Row ? $spo2Row["recorded_at"] : date("Y-m-d 09:30:00")
-];
+if ($spo2Row) {
+    $spo2 = [
+        "percentage" => (int)$spo2Row["value_numeric"],
+        "status" => $spo2Row["status_label"] ?: "Optimal",
+        "recorded_at" => $spo2Row["recorded_at"],
+        "has_data" => true
+    ];
+} else {
+    $spo2 = [
+        "percentage" => 0,
+        "status" => "No readings yet",
+        "recorded_at" => "",
+        "has_data" => false
+    ];
+}
 
 // Today's Steps & Goal
 $today = date("Y-m-d");
@@ -90,9 +127,9 @@ $actRow = $stepStmt->get_result()->fetch_assoc();
 $stepStmt->close();
 
 $currentSteps = (int)$actRow["total_steps"];
-if ($currentSteps === 0) $currentSteps = 6245; // sensible baseline matching UI sample
-$distanceKm = (float)$actRow["total_km"] > 0 ? (float)$actRow["total_km"] : round($currentSteps * 0.00075, 2);
-$caloriesBurned = (int)$actRow["total_cal"] > 0 ? (int)$actRow["total_cal"] : (int)($currentSteps * 0.04);
+$distanceKm = (float)$actRow["total_km"];
+$caloriesBurned = (int)$actRow["total_cal"];
+$stepsProgress = ($stepGoal > 0) ? min(100, (int)(($currentSteps / $stepGoal) * 100)) : 0;
 
 // Today's Hydration
 $hydStmt = $conn->prepare("SELECT COALESCE(SUM(amount_ml), 0) AS consumed_ml FROM hydration_logs WHERE user_id = ? AND date_string = ?");
@@ -102,7 +139,14 @@ $hRow = $hydStmt->get_result()->fetch_assoc();
 $hydStmt->close();
 
 $consumedMl = (int)$hRow["consumed_ml"];
-if ($consumedMl === 0) $consumedMl = 1250; // default 5 glasses matching UI
+$hgStmt = $conn->prepare("SELECT daily_target_ml FROM hydration_goals WHERE user_id = ? LIMIT 1");
+$hgStmt->bind_param("i", $userId);
+$hgStmt->execute();
+$hgRow = $hgStmt->get_result()->fetch_assoc();
+$hgStmt->close();
+$targetMl = $hgRow ? (int)$hgRow["daily_target_ml"] : 2000;
+$glasses = round($consumedMl / 250, 1);
+$hydProgress = ($targetMl > 0) ? min(100, (int)(($consumedMl / $targetMl) * 100)) : 0;
 
 // Last Night's Sleep
 $yesterday = date("Y-m-d", strtotime("-1 day"));
@@ -112,28 +156,78 @@ $slStmt->execute();
 $sleepRow = $slStmt->get_result()->fetch_assoc();
 $slStmt->close();
 
-$sleep = [
-    "duration_minutes" => $sleepRow ? (int)$sleepRow["duration_minutes"] : 452,
-    "duration_formatted" => $sleepRow ? (intdiv($sleepRow["duration_minutes"], 60) . "h " . ($sleepRow["duration_minutes"] % 60) . "m") : "7h 32m",
-    "sleep_score" => $sleepRow ? (int)$sleepRow["sleep_score"] : 80,
-    "quality" => $sleepRow ? $sleepRow["quality_label"] : "Restful",
-    "bedtime" => $sleepRow ? $sleepRow["bedtime"] : "10:30 PM",
-    "wake_time" => $sleepRow ? $sleepRow["wake_time"] : "06:15 AM"
-];
+if ($sleepRow) {
+    $durationMin = (int)$sleepRow["duration_minutes"];
+    $sleep = [
+        "duration_minutes" => $durationMin,
+        "duration_formatted" => intdiv($durationMin, 60) . "h " . ($durationMin % 60) . "m",
+        "sleep_score" => (int)$sleepRow["sleep_score"],
+        "quality" => $sleepRow["quality_label"] ?: "Normal",
+        "bedtime" => $sleepRow["bedtime"] ?: "",
+        "wake_time" => $sleepRow["wake_time"] ?: "",
+        "has_data" => true
+    ];
+} else {
+    $sleep = [
+        "duration_minutes" => 0,
+        "duration_formatted" => "--",
+        "sleep_score" => 0,
+        "quality" => "No record",
+        "bedtime" => "",
+        "wake_time" => "",
+        "has_data" => false
+    ];
+}
 
 $conn->close();
 
+// Compute live wellness score
+$vitalCount = 0;
+$vitalScoreAcc = 0;
+if ($hrRow) {
+    $bpm = (int)$hrRow["value_numeric"];
+    $vitalScoreAcc += ($bpm >= 60 && $bpm <= 90) ? 90 : (($bpm >= 50 && $bpm <= 100) ? 75 : 60);
+    $vitalCount++;
+}
+if ($bpRow) {
+    $sys = (int)$bpRow["systolic"];
+    $dia = (int)$bpRow["diastolic"];
+    $vitalScoreAcc += ($sys <= 120 && $dia <= 80) ? 95 : (($sys <= 130 && $dia <= 85) ? 80 : 65);
+    $vitalCount++;
+}
+if ($spo2Row) {
+    $pct = (int)$spo2Row["value_numeric"];
+    $vitalScoreAcc += ($pct >= 97) ? 98 : (($pct >= 94) ? 80 : 60);
+    $vitalCount++;
+}
+if ($currentSteps > 0) {
+    $vitalScoreAcc += min(100, (int)(($currentSteps / $stepGoal) * 100));
+    $vitalCount++;
+}
+if ($consumedMl > 0) {
+    $vitalScoreAcc += min(100, (int)(($consumedMl / $targetMl) * 100));
+    $vitalCount++;
+}
+
+if ($vitalCount > 0) {
+    $liveWellnessScore = (int)round($vitalScoreAcc / $vitalCount);
+    $liveWellnessStatus = ($liveWellnessScore >= 80) ? "Optimal State" : (($liveWellnessScore >= 60) ? "Good State" : "Needs Attention");
+} else {
+    $liveWellnessScore = 0;
+    $liveWellnessStatus = "No data recorded";
+}
+
 respondJson(200, [
     "success" => true,
-    "wellness_score" => 84,
-    "wellness_status" => "Optimal State",
+    "wellness_score" => $liveWellnessScore,
+    "wellness_status" => $liveWellnessStatus,
     "summary" => [
         "heart_rate" => $heartRate,
         "blood_pressure" => $bloodPressure,
         "spo2" => $spo2,
         "bmi" => [
             "value" => $bmi,
-            "category" => ($bmi < 18.5) ? "Underweight" : (($bmi <= 24.9) ? "Healthy Range" : "Overweight"),
+            "category" => $bmiCategory,
             "height_cm" => $height,
             "weight_kg" => $weight
         ],
@@ -142,15 +236,14 @@ respondJson(200, [
             "goal" => $stepGoal,
             "distance_km" => $distanceKm,
             "calories_kcal" => $caloriesBurned,
-            "progress_percent" => min(100, (int)(($currentSteps / $stepGoal) * 100))
+            "progress_percent" => $stepsProgress
         ],
         "hydration" => [
             "consumed_ml" => $consumedMl,
-            "target_ml" => 2000,
-            "glasses" => round($consumedMl / 250, 1),
-            "progress_percent" => min(100, (int)(($consumedMl / 2000) * 100))
+            "target_ml" => $targetMl,
+            "glasses" => $glasses,
+            "progress_percent" => $hydProgress
         ],
         "sleep" => $sleep
     ]
 ]);
-

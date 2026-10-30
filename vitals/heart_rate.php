@@ -18,9 +18,9 @@ if ($method === "GET") {
     $latest = $latestStmt->get_result()->fetch_assoc();
     $latestStmt->close();
 
-    $currentBpm = $latest ? (int)$latest["value_numeric"] : 76;
-    $status = $latest ? $latest["status_label"] : "Normal";
-    $recordedAt = $latest ? $latest["recorded_at"] : date("Y-m-d 09:00:00");
+    $currentBpm = $latest ? (int)$latest["value_numeric"] : 0;
+    $status = $latest ? ($latest["status_label"] ?: "Normal") : "No readings yet";
+    $recordedAt = $latest ? $latest["recorded_at"] : "";
 
     // Min, Max, Avg today
     $today = date("Y-m-d");
@@ -34,9 +34,10 @@ if ($method === "GET") {
     $stats = $statsStmt->get_result()->fetch_assoc();
     $statsStmt->close();
 
-    $minBpm = ($stats && $stats["min_bpm"] !== null) ? (int)$stats["min_bpm"] : 58;
-    $maxBpm = ($stats && $stats["max_bpm"] !== null) ? (int)$stats["max_bpm"] : 124;
-    $avgBpm = ($stats && $stats["avg_bpm"] !== null) ? (int)round($stats["avg_bpm"]) : 72;
+    $minBpm = ($stats && $stats["min_bpm"] !== null) ? (int)$stats["min_bpm"] : ($latest ? $currentBpm : 0);
+    $maxBpm = ($stats && $stats["max_bpm"] !== null) ? (int)$stats["max_bpm"] : ($latest ? $currentBpm : 0);
+    $avgBpm = ($stats && $stats["avg_bpm"] !== null) ? (int)round($stats["avg_bpm"]) : ($latest ? $currentBpm : 0);
+    $restingBpm = $latest ? max(45, (int)round($currentBpm * 0.85)) : 0;
 
     // Time-series points for intraday chart
     $chartStmt = $conn->prepare(
@@ -57,18 +58,6 @@ if ($method === "GET") {
     }
     $chartStmt->close();
 
-    // Default curve points if empty
-    if (empty($points)) {
-        $points = [
-            ["bpm" => 68, "time" => "06:00 AM"],
-            ["bpm" => 74, "time" => "09:00 AM"],
-            ["bpm" => 88, "time" => "12:00 PM"],
-            ["bpm" => 76, "time" => "03:00 PM"],
-            ["bpm" => 92, "time" => "06:00 PM"],
-            ["bpm" => 71, "time" => "09:00 PM"]
-        ];
-    }
-
     $conn->close();
 
     respondJson(200, [
@@ -76,7 +65,7 @@ if ($method === "GET") {
         "heart_rate" => [
             "current_bpm" => $currentBpm,
             "status" => $status,
-            "resting_bpm" => 64,
+            "resting_bpm" => $restingBpm,
             "min_bpm" => $minBpm,
             "max_bpm" => $maxBpm,
             "avg_bpm" => $avgBpm,

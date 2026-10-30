@@ -30,10 +30,12 @@ if ($method === "GET") {
     $conn->close();
 
     $latest = !empty($history) ? $history[0] : [
-        "percentage" => 98,
-        "formatted" => "98%",
-        "status" => "Optimal",
-        "recorded_at" => date("Y-m-d 09:30:00")
+        "id" => 0,
+        "percentage" => 0,
+        "formatted" => "--%",
+        "status" => "No readings yet",
+        "source" => "",
+        "recorded_at" => ""
     ];
 
     respondJson(200, [

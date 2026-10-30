@@ -20,15 +20,15 @@ if ($method === "GET") {
     $rec = $stmt->get_result()->fetch_assoc();
     $stmt->close();
 
-    $durationMin = $rec ? (int)$rec["duration_minutes"] : 452; // 7h 32m
-    $score = $rec ? (int)$rec["sleep_score"] : 80;
-    $quality = $rec ? $rec["quality_label"] : "Restful";
-    $bedtime = $rec ? $rec["bedtime"] : "10:30 PM";
-    $wakeTime = $rec ? $rec["wake_time"] : "06:15 AM";
-    $deep = $rec ? (int)$rec["deep_sleep_minutes"] : 95;
-    $light = $rec ? (int)$rec["light_sleep_minutes"] : 250;
-    $rem = $rec ? (int)$rec["rem_sleep_minutes"] : 85;
-    $awake = $rec ? (int)$rec["awake_minutes"] : 22;
+    $durationMin = $rec ? (int)$rec["duration_minutes"] : 0;
+    $score = $rec ? (int)$rec["sleep_score"] : 0;
+    $quality = $rec ? $rec["quality_label"] : "No record";
+    $bedtime = $rec ? $rec["bedtime"] : "";
+    $wakeTime = $rec ? $rec["wake_time"] : "";
+    $deep = $rec ? (int)$rec["deep_sleep_minutes"] : 0;
+    $light = $rec ? (int)$rec["light_sleep_minutes"] : 0;
+    $rem = $rec ? (int)$rec["rem_sleep_minutes"] : 0;
+    $awake = $rec ? (int)$rec["awake_minutes"] : 0;
 
     $hours = intdiv($durationMin, 60);
     $minutes = $durationMin % 60;

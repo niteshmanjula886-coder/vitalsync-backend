@@ -31,12 +31,13 @@ if ($method === "GET") {
     $conn->close();
 
     $latest = !empty($history) ? $history[0] : [
-        "systolic" => 120,
-        "diastolic" => 80,
-        "pulse" => 72,
-        "formatted" => "120/80 mmHg",
-        "status" => "Normal",
-        "recorded_at" => date("Y-m-d 09:30:00")
+        "systolic" => 0,
+        "diastolic" => 0,
+        "pulse" => 0,
+        "formatted" => "--/-- mmHg",
+        "status" => "No readings yet",
+        "source" => "",
+        "recorded_at" => ""
     ];
 
     respondJson(200, [

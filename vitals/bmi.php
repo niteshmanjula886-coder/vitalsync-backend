@@ -12,13 +12,14 @@ if ($method === "GET") {
     $user = $stmt->get_result()->fetch_assoc();
     $stmt->close();
 
-    $height = ($user && $user["height"]) ? (float)$user["height"] : 175.0;
-    $weight = ($user && $user["weight"]) ? (float)$user["weight"] : 68.5;
-    $age = ($user && $user["age"]) ? (int)$user["age"] : 28;
-    $gender = ($user && $user["gender"]) ? $user["gender"] : "Male";
+    $height = ($user && $user["height"] !== null) ? (float)$user["height"] : 0.0;
+    $weight = ($user && $user["weight"] !== null) ? (float)$user["weight"] : 0.0;
+    $age = ($user && $user["age"] !== null) ? (int)$user["age"] : 0;
+    $gender = ($user && !empty($user["gender"])) ? $user["gender"] : "";
 
-    $bmi = ($height > 0) ? round($weight / (($height / 100) * ($height / 100)), 1) : 22.4;
-    $category = ($bmi < 18.5) ? "Underweight" : (($bmi <= 24.9) ? "Healthy Range" : (($bmi <= 29.9) ? "Overweight" : "Obese"));
+    $hasValidBmi = ($height > 0 && $weight > 0);
+    $bmi = $hasValidBmi ? round($weight / (($height / 100) * ($height / 100)), 1) : 0.0;
+    $category = $hasValidBmi ? (($bmi < 18.5) ? "Underweight" : (($bmi <= 24.9) ? "Healthy Range" : (($bmi <= 29.9) ? "Overweight" : "Obese"))) : "Not configured";
 
     $conn->close();
 
@@ -32,8 +33,8 @@ if ($method === "GET") {
             "age" => $age,
             "gender" => $gender,
             "healthy_weight_range_kg" => [
-                "min" => round(18.5 * (($height / 100) * ($height / 100)), 1),
-                "max" => round(24.9 * (($height / 100) * ($height / 100)), 1)
+                "min" => $height > 0 ? round(18.5 * (($height / 100) * ($height / 100)), 1) : 0.0,
+                "max" => $height > 0 ? round(24.9 * (($height / 100) * ($height / 100)), 1) : 0.0
             ]
         ]
     ]);
