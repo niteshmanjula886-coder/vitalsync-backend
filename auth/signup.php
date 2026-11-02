@@ -16,6 +16,7 @@ if ($_SERVER["REQUEST_METHOD"] !== "POST") {
     http_response_code(405);
     echo json_encode([
         "success" => false,
+        "status" => "error",
         "message" => "POST method required"
     ]);
     exit;
@@ -32,6 +33,7 @@ if (!is_array($data) || empty($data)) {
     http_response_code(400);
     echo json_encode([
         "success" => false,
+        "status" => "error",
         "message" => "Invalid or empty request data"
     ]);
     exit;
@@ -50,7 +52,7 @@ $gender = isset($data["gender"]) ? trim((string)$data["gender"]) : null;
 $height = isset($data["height"]) && is_numeric($data["height"]) ? (float)$data["height"] : null;
 $weight = isset($data["weight"]) && is_numeric($data["weight"]) ? (float)$data["weight"] : null;
 $activityLevel = isset($data["activity_level"]) ? trim((string)$data["activity_level"]) : null;
-$primaryGoal = isset($data["primary_goal"]) ? trim((string)$data["primary_goal"]) : "Fitness";
+$primaryGoal = isset($data["primary_goal"]) ? trim((string)$data["primary_goal"]) : "Improve Fitness";
 
 // If dob is provided but age is not, calculate age
 if ($age === null && !empty($dob)) {
@@ -66,6 +68,7 @@ if ($name === "" || mb_strlen($name) > 100) {
     http_response_code(400);
     echo json_encode([
         "success" => false,
+        "status" => "error",
         "message" => "Enter a valid name (1–100 characters)"
     ]);
     exit;
@@ -75,6 +78,7 @@ if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 255) {
     http_response_code(400);
     echo json_encode([
         "success" => false,
+        "status" => "error",
         "message" => "Enter a valid email address"
     ]);
     exit;
@@ -84,6 +88,7 @@ if (!is_string($password) || strlen($password) < 6 || strlen($password) > 72) {
     http_response_code(400);
     echo json_encode([
         "success" => false,
+        "status" => "error",
         "message" => "Password must be between 6 and 72 characters"
     ]);
     exit;
@@ -93,6 +98,7 @@ if ($password !== $confirmPassword) {
     http_response_code(400);
     echo json_encode([
         "success" => false,
+        "status" => "error",
         "message" => "Passwords do not match"
     ]);
     exit;
@@ -104,6 +110,7 @@ if (!$checkStmt) {
     http_response_code(500);
     echo json_encode([
         "success" => false,
+        "status" => "error",
         "message" => "Database prepare statement failed"
     ]);
     exit;
@@ -118,6 +125,7 @@ if ($checkResult->num_rows > 0) {
     http_response_code(409);
     echo json_encode([
         "success" => false,
+        "status" => "error",
         "message" => "An account with this email already exists"
     ]);
     exit;
@@ -135,6 +143,7 @@ if (!$stmt) {
     http_response_code(500);
     echo json_encode([
         "success" => false,
+        "status" => "error",
         "message" => "Database statement preparation failed: " . $conn->error
     ]);
     exit;
@@ -158,11 +167,37 @@ $stmt->bind_param(
 if ($stmt->execute()) {
     $newUserId = $stmt->insert_id;
     $stmt->close();
+
+    // 1. Initialize user_profiles
+    $profStmt = $conn->prepare("INSERT INTO user_profiles (user_id, full_name, age, gender, height_cm, weight_kg, phone) VALUES (?, ?, ?, ?, ?, ?, ?)");
+    if ($profStmt) {
+        $profStmt->bind_param("isisdds", $newUserId, $name, $age, $gender, $height, $weight, $phone);
+        $profStmt->execute();
+        $profStmt->close();
+    }
+
+    // 2. Initialize user_health_goals
+    $goalStmt = $conn->prepare("INSERT INTO user_health_goals (user_id, primary_goal) VALUES (?, ?)");
+    if ($goalStmt) {
+        $goalStmt->bind_param("is", $newUserId, $primaryGoal);
+        $goalStmt->execute();
+        $goalStmt->close();
+    }
+
+    // 3. Initialize user_app_settings
+    $setStmt = $conn->prepare("INSERT INTO user_app_settings (user_id) VALUES (?)");
+    if ($setStmt) {
+        $setStmt->bind_param("i", $newUserId);
+        $setStmt->execute();
+        $setStmt->close();
+    }
+
     $conn->close();
 
     http_response_code(201);
     echo json_encode([
         "success" => true,
+        "status" => "success",
         "message" => "Account created successfully",
         "user" => [
             "id" => $newUserId,
@@ -178,11 +213,12 @@ if ($stmt->execute()) {
             "activity_level" => $activityLevel,
             "primary_goal" => $primaryGoal
         ]
-    ]);
+    ], JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
 } elseif ($stmt->errno === 1062) {
     http_response_code(409);
     echo json_encode([
         "success" => false,
+        "status" => "error",
         "message" => "An account with this email already exists"
     ]);
     $stmt->close();
@@ -192,6 +228,7 @@ if ($stmt->execute()) {
     http_response_code(500);
     echo json_encode([
         "success" => false,
+        "status" => "error",
         "message" => "Account creation failed"
     ]);
     $stmt->close();

@@ -118,6 +118,35 @@ if ($method === "POST") {
     if ($stmt->execute()) {
         $newId = $stmt->insert_id;
         $stmt->close();
+
+        // Also record in vitals_logs for relational schema consistency
+        if ($type === "heart_rate" && $valNum !== null) {
+            $hrVal = (int)$valNum;
+            $lStmt = $conn->prepare("INSERT INTO vitals_logs (user_id, heart_rate, source, logged_at) VALUES (?, ?, ?, ?)");
+            if ($lStmt) {
+                $lStmt->bind_param("iiss", $userId, $hrVal, $source, $recordedAt);
+                $lStmt->execute();
+                $lStmt->close();
+            }
+        } elseif ($type === "spo2" && $valNum !== null) {
+            $spo2Val = (int)$valNum;
+            $lStmt = $conn->prepare("INSERT INTO vitals_logs (user_id, spo2, source, logged_at) VALUES (?, ?, ?, ?)");
+            if ($lStmt) {
+                $lStmt->bind_param("iiss", $userId, $spo2Val, $source, $recordedAt);
+                $lStmt->execute();
+                $lStmt->close();
+            }
+        } elseif ($type === "blood_pressure" && $valNum !== null) {
+            $sysVal = (int)$valNum;
+            $diaVal = $valSec !== null ? (int)$valSec : null;
+            $lStmt = $conn->prepare("INSERT INTO vitals_logs (user_id, systolic_bp, diastolic_bp, source, logged_at) VALUES (?, ?, ?, ?, ?)");
+            if ($lStmt) {
+                $lStmt->bind_param("iiiss", $userId, $sysVal, $diaVal, $source, $recordedAt);
+                $lStmt->execute();
+                $lStmt->close();
+            }
+        }
+
         $conn->close();
 
         respondJson(201, [

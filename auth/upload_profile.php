@@ -168,8 +168,16 @@ if (!$updateStmt->execute()) {
         "message" => "Could not update profile image in database"
     ]);
 }
-
 $updateStmt->close();
+
+// Also update avatar_url in user_profiles
+$updateProfStmt = $conn->prepare("UPDATE user_profiles SET avatar_url = ? WHERE user_id = ?");
+if ($updateProfStmt) {
+    $updateProfStmt->bind_param("si", $imagePath, $targetUserId);
+    $updateProfStmt->execute();
+    $updateProfStmt->close();
+}
+
 $conn->close();
 
 // Build URL
@@ -182,5 +190,6 @@ respond(200, [
     "message" => "Profile photo uploaded successfully",
     "user_id" => $targetUserId,
     "profile_image" => $imagePath,
-    "image_url" => $fullImageUrl
+    "image_url" => $fullImageUrl,
+    "avatar_url" => $fullImageUrl
 ]);

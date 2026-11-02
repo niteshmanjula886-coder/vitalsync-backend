@@ -30,6 +30,28 @@ if ($method === "GET") {
     $rem = $rec ? (int)$rec["rem_sleep_minutes"] : 0;
     $awake = $rec ? (int)$rec["awake_minutes"] : 0;
 
+    // Fallback to sleep_logs if sleep_records empty
+    if ($durationMin <= 0) {
+        $slStmt = $conn->prepare("SELECT id, start_time, end_time, duration_minutes, quality_score, bedtime, wake_time, logged_at FROM sleep_logs WHERE user_id = ? AND (logged_at = ? OR logged_at <= ?) ORDER BY logged_at DESC LIMIT 1");
+        if ($slStmt) {
+            $slStmt->bind_param("iss", $userId, $date, $date);
+            $slStmt->execute();
+            $slRec = $slStmt->get_result()->fetch_assoc();
+            $slStmt->close();
+            if ($slRec && (int)$slRec["duration_minutes"] > 0) {
+                $durationMin = (int)$slRec["duration_minutes"];
+                $score = $slRec["quality_score"] !== null ? (int)$slRec["quality_score"] : 80;
+                $quality = ($durationMin < 360) ? "Insufficient" : (($durationMin < 480) ? "Fair" : "Restful");
+                $bedtime = !empty($slRec["bedtime"]) ? $slRec["bedtime"] : date("h:i A", strtotime($slRec["start_time"]));
+                $wakeTime = !empty($slRec["wake_time"]) ? $slRec["wake_time"] : date("h:i A", strtotime($slRec["end_time"]));
+                $deep = (int)($durationMin * 0.22);
+                $light = (int)($durationMin * 0.55);
+                $rem = (int)($durationMin * 0.18);
+                $awake = (int)($durationMin * 0.05);
+            }
+        }
+    }
+
     $hours = intdiv($durationMin, 60);
     $minutes = $durationMin % 60;
 
@@ -119,6 +141,35 @@ if ($method === "POST") {
 
     if ($stmt->execute()) {
         $stmt->close();
+
+        // Also sync into sleep_logs for master schema persistence
+        $startTime = date("Y-m-d H:i:s", strtotime("$dateString $bedtime"));
+        $endTime = date("Y-m-d H:i:s", strtotime("$dateString $wakeTime"));
+        if (strtotime($endTime) <= strtotime($startTime)) {
+            $endTime = date("Y-m-d H:i:s", strtotime($startTime) + ($duration * 60));
+        }
+
+        $logCheck = $conn->prepare("SELECT id FROM sleep_logs WHERE user_id = ? AND (logged_at = ? OR logged_date = ?) LIMIT 1");
+        if ($logCheck) {
+            $logCheck->bind_param("iss", $userId, $dateString, $dateString);
+            $logCheck->execute();
+            $existLog = $logCheck->get_result()->fetch_assoc();
+            $logCheck->close();
+
+            $statusColor = ($duration < 360) ? "critical" : (($duration < 480) ? "warning" : "optimal");
+            if ($existLog) {
+                $uLog = $conn->prepare("UPDATE sleep_logs SET start_time = ?, end_time = ?, duration_minutes = ?, quality_score = ?, logged_at = ?, bedtime = ?, wake_time = ?, status_color = ?, logged_date = ? WHERE id = ?");
+                $uLog->bind_param("ssiisssssi", $startTime, $endTime, $duration, $score, $dateString, $bedtime, $wakeTime, $statusColor, $dateString, $existLog["id"]);
+                $uLog->execute();
+                $uLog->close();
+            } else {
+                $iLog = $conn->prepare("INSERT INTO sleep_logs (user_id, start_time, end_time, duration_minutes, quality_score, logged_at, bedtime, wake_time, status_color, logged_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                $iLog->bind_param("isssiissss", $userId, $startTime, $endTime, $duration, $score, $dateString, $bedtime, $wakeTime, $statusColor, $dateString);
+                $iLog->execute();
+                $iLog->close();
+            }
+        }
+
         $conn->close();
 
         respondJson(201, [

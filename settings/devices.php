@@ -24,32 +24,6 @@ if ($method === "GET") {
         ];
     }
     $stmt->close();
-
-    // Default seeded devices if empty
-    if (empty($devices)) {
-        $seed = [
-            ["VitalSync Watch Pro", "Smart Watch", 1, 88],
-            ["Android Health Connect", "Health Sync Service", 1, 100],
-            ["Bluetooth BPM Monitor", "Medical Sensor", 0, 45]
-        ];
-
-        $ins = $conn->prepare("INSERT INTO connected_devices (user_id, device_name, device_type, is_connected, battery_level) VALUES (?, ?, ?, ?, ?)");
-        foreach ($seed as $d) {
-            $ins->bind_param("issii", $userId, $d[0], $d[1], $d[2], $d[3]);
-            $ins->execute();
-            $devices[] = [
-                "id" => (int)$ins->insert_id,
-                "device_name" => $d[0],
-                "device_type" => $d[1],
-                "is_connected" => (bool)$d[2],
-                "battery_level" => $d[3],
-                "last_synced" => date("Y-m-d H:i:s"),
-                "last_synced_formatted" => date("M d, h:i A")
-            ];
-        }
-        $ins->close();
-    }
-
     $conn->close();
 
     respondJson(200, [

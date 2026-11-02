@@ -16,26 +16,64 @@ $stepGoal = $goalRow ? (int)$goalRow["daily_step_goal"] : 8000;
 $calorieGoal = $goalRow ? (int)$goalRow["daily_calorie_goal"] : 500;
 $activeMinGoal = $goalRow ? (int)$goalRow["daily_active_minutes_goal"] : 45;
 
-// Aggregate today's sessions
-$aggStmt = $conn->prepare(
+// Aggregate today's sessions (workout_sessions first, fallback to activity_sessions)
+$steps = 0;
+$distance = 0.00;
+$calories = 0;
+$totalSeconds = 0;
+$sessionCount = 0;
+
+$wsAgg = $conn->prepare(
     "SELECT 
         COALESCE(SUM(steps), 0) AS total_steps,
-        COALESCE(SUM(distance_km), 0.00) AS total_distance,
-        COALESCE(SUM(calories_burned), 0) AS total_calories,
+        COALESCE(SUM(CASE WHEN distance_km > 0 THEN distance_km ELSE distance_meters/1000.0 END), 0.00) AS total_distance,
+        COALESCE(SUM(calories), 0) AS total_calories,
         COALESCE(SUM(duration_seconds), 0) AS total_seconds,
         COUNT(id) AS session_count
-     FROM activity_sessions 
+     FROM workout_sessions 
      WHERE user_id = ? AND DATE(start_time) = ?"
 );
-$aggStmt->bind_param("is", $userId, $today);
-$aggStmt->execute();
-$agg = $aggStmt->get_result()->fetch_assoc();
-$aggStmt->close();
+if ($wsAgg) {
+    $wsAgg->bind_param("is", $userId, $today);
+    $wsAgg->execute();
+    $wsRow = $wsAgg->get_result()->fetch_assoc();
+    if ($wsRow && (int)$wsRow["session_count"] > 0) {
+        $steps = (int)$wsRow["total_steps"];
+        $distance = round((float)$wsRow["total_distance"], 2);
+        $calories = (int)$wsRow["total_calories"];
+        $totalSeconds = (int)$wsRow["total_seconds"];
+        $sessionCount = (int)$wsRow["session_count"];
+    }
+    $wsAgg->close();
+}
 
-$steps = (int)$agg["total_steps"];
-$distance = (float)$agg["total_distance"];
-$calories = (int)$agg["total_calories"];
-$activeMinutes = intdiv($agg["total_seconds"], 60);
+if ($sessionCount === 0) {
+    $aggStmt = $conn->prepare(
+        "SELECT 
+            COALESCE(SUM(steps), 0) AS total_steps,
+            COALESCE(SUM(distance_km), 0.00) AS total_distance,
+            COALESCE(SUM(calories_burned), 0) AS total_calories,
+            COALESCE(SUM(duration_seconds), 0) AS total_seconds,
+            COUNT(id) AS session_count
+         FROM activity_sessions 
+         WHERE user_id = ? AND DATE(start_time) = ?"
+    );
+    if ($aggStmt) {
+        $aggStmt->bind_param("is", $userId, $today);
+        $aggStmt->execute();
+        $agg = $aggStmt->get_result()->fetch_assoc();
+        if ($agg) {
+            $steps = (int)$agg["total_steps"];
+            $distance = round((float)$agg["total_distance"], 2);
+            $calories = (int)$agg["total_calories"];
+            $totalSeconds = (int)$agg["total_seconds"];
+            $sessionCount = (int)$agg["session_count"];
+        }
+        $aggStmt->close();
+    }
+}
+
+$activeMinutes = intdiv($totalSeconds, 60);
 
 $conn->close();
 
@@ -59,7 +97,7 @@ respondJson(200, [
             "goal" => $activeMinGoal,
             "progress_percent" => min(100, (int)(($activeMinutes / $activeMinGoal) * 100))
         ],
-        "sessions_count" => (int)$agg["session_count"]
+        "sessions_count" => $sessionCount
     ]
 ]);
 

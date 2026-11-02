@@ -34,9 +34,9 @@ while ($r = $vResult->fetch_assoc()) {
     $typeMap = [
         "heart_rate" => ["Heart Rate", "❤️", "bpm"],
         "blood_pressure" => ["Blood Pressure", "🩺", "mmHg"],
-        "spo2" => ["SpO₂", "🫁", "%"],
+        "spo2" => ["SpO2", "🫁", "%"],
         "hydration" => ["Hydration", "💧", "ml"],
-        "steps" => ["Step Count", "👟", "steps"],
+        "steps" => ["Step Count", "🏃", "steps"],
         "sleep" => ["Sleep", "🌙", "hours"],
         "bmi" => ["BMI", "⚖️", "kg/m²"]
     ];
@@ -59,51 +59,8 @@ while ($r = $vResult->fetch_assoc()) {
 $vStmt->close();
 $conn->close();
 
-// Provide fallback sample data if empty
-if (empty($historyItems)) {
-    $historyItems = [
-        [
-            "id" => "1",
-            "category" => "Heart Rate",
-            "dateGroup" => "Today • " . date("M d"),
-            "dayTag" => date("M d"),
-            "icon" => "❤️",
-            "title" => "Heart Rate",
-            "value" => "78",
-            "unit" => "bpm",
-            "status" => "Normal",
-            "time" => "09:30 AM • Health Connect"
-        ],
-        [
-            "id" => "2",
-            "category" => "Blood Pressure",
-            "dateGroup" => "Today • " . date("M d"),
-            "dayTag" => date("M d"),
-            "icon" => "🩺",
-            "title" => "Blood Pressure",
-            "value" => "120/80",
-            "unit" => "mmHg",
-            "status" => "Normal",
-            "time" => "09:30 AM • Saved"
-        ],
-        [
-            "id" => "3",
-            "category" => "SpO₂",
-            "dateGroup" => "Today • " . date("M d"),
-            "dayTag" => date("M d"),
-            "icon" => "🫁",
-            "title" => "SpO₂",
-            "value" => "98",
-            "unit" => "%",
-            "status" => "Optimal",
-            "time" => "09:30 AM • Saved"
-        ]
-    ];
-}
-
 respondJson(200, [
     "success" => true,
     "count" => count($historyItems),
     "history" => $historyItems
 ]);
-

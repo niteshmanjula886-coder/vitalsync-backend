@@ -14,18 +14,20 @@ require_once __DIR__ . "/../config/db.php";
 
 function respond($status, $data) {
     http_response_code($status);
-    echo json_encode($data);
+    echo json_encode($data, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
     exit;
 }
 
-function buildProfileResponse($user) {
+function buildProfileResponse($user, $userProfile = null) {
     $scheme = (!empty($_SERVER["HTTPS"]) && $_SERVER["HTTPS"] !== "off") ? "https" : "http";
     $host = $_SERVER["HTTP_HOST"] ?? "localhost";
     $baseUrl = $scheme . "://" . $host . "/vitalsync_background/";
-    $imageUrl = !empty($user["profile_image"]) ? $baseUrl . $user["profile_image"] : null;
+
+    $rawAvatar = !empty($userProfile["avatar_url"]) ? $userProfile["avatar_url"] : ($user["profile_image"] ?? null);
+    $imageUrl = !empty($rawAvatar) ? (preg_match('#^https?://#i', $rawAvatar) ? $rawAvatar : $baseUrl . ltrim($rawAvatar, "/")) : null;
 
     $dob = $user["dob"] ?? null;
-    $age = $user["age"] !== null ? (int)$user["age"] : null;
+    $age = $userProfile["age"] ?? ($user["age"] !== null ? (int)$user["age"] : null);
     if ($age === null && !empty($dob)) {
         if (preg_match('/\b(19\d\d|20\d\d)\b/', $dob, $matches)) {
             $birthYear = (int)$matches[1];
@@ -34,30 +36,42 @@ function buildProfileResponse($user) {
         }
     }
 
+    $height = $userProfile["height_cm"] !== null ? (float)$userProfile["height_cm"] : ($user["height"] !== null ? (float)$user["height"] : null);
+    $weight = $userProfile["weight_kg"] !== null ? (float)$userProfile["weight_kg"] : ($user["weight"] !== null ? (float)$user["weight"] : null);
+    $gender = $userProfile["gender"] ?: ($user["gender"] ?: "Not Specified");
+    $phone = $userProfile["phone"] ?: $user["phone"];
+    $bloodGroup = $userProfile["blood_group"] ?? null;
+    $fullName = $userProfile["full_name"] ?: $user["full_name"];
+
     return [
         "id" => (int)$user["id"],
-        "name" => $user["full_name"],
-        "full_name" => $user["full_name"],
+        "user_id" => (int)$user["id"],
+        "name" => $fullName,
+        "full_name" => $fullName,
         "email" => $user["email"],
-        "phone" => $user["phone"],
+        "phone" => $phone,
         "dob" => $user["dob"],
         "age" => $age,
-        "gender" => $user["gender"],
-        "height" => $user["height"] !== null ? (float)$user["height"] : null,
-        "weight" => $user["weight"] !== null ? (float)$user["weight"] : null,
+        "gender" => $gender,
+        "height" => $height,
+        "height_cm" => $height,
+        "weight" => $weight,
+        "weight_kg" => $weight,
+        "blood_group" => $bloodGroup,
         "activity_level" => $user["activity_level"],
         "primary_goal" => $user["primary_goal"] ?? "Fitness",
         "profile_image" => $user["profile_image"],
         "image_url" => $imageUrl,
+        "avatar_url" => $imageUrl,
         "created_at" => $user["created_at"],
-        "updated_at" => $user["updated_at"]
+        "updated_at" => $userProfile["updated_at"] ?? $user["updated_at"]
     ];
 }
 
 $method = $_SERVER["REQUEST_METHOD"];
 
 // ==========================================
-// 1. GET: Fetch Profile
+// 1. GET: Fetch Profile, Health Goals & App Settings
 // ==========================================
 if ($method === "GET") {
     $email = strtolower(trim($_GET["email"] ?? ""));
@@ -66,7 +80,8 @@ if ($method === "GET") {
     if ($userId <= 0 && $email === "") {
         respond(400, [
             "success" => false,
-            "message" => "Please provide a valid user email or user_id in the query parameter"
+            "status" => "error",
+            "message" => "Please provide user_id or email in the query parameters"
         ]);
     }
 
@@ -79,12 +94,6 @@ if ($method === "GET") {
         );
         $stmt->bind_param("i", $userId);
     } else {
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            respond(400, [
-                "success" => false,
-                "message" => "Enter a valid email address"
-            ]);
-        }
         $stmt = $conn->prepare(
             "SELECT id, full_name, email, phone, dob, age, gender, height, weight, activity_level, primary_goal, profile_image, created_at, updated_at
              FROM users
@@ -94,30 +103,110 @@ if ($method === "GET") {
         $stmt->bind_param("s", $email);
     }
 
-    if (!$stmt) {
-        respond(500, [
-            "success" => false,
-            "message" => "Database query failed: " . $conn->error
-        ]);
-    }
-
     $stmt->execute();
     $result = $stmt->get_result();
     $user = $result->fetch_assoc();
     $stmt->close();
-    $conn->close();
 
     if (!$user) {
         respond(404, [
             "success" => false,
-            "message" => "User profile not found"
+            "status" => "error",
+            "message" => "User not found"
         ]);
     }
 
+    $userId = (int)$user["id"];
+
+    // 2. Fetch from user_profiles
+    $pStmt = $conn->prepare("SELECT user_id, full_name, age, gender, height_cm, weight_kg, blood_group, phone, avatar_url, updated_at FROM user_profiles WHERE user_id = ? LIMIT 1");
+    $pStmt->bind_param("i", $userId);
+    $pStmt->execute();
+    $uProf = $pStmt->get_result()->fetch_assoc();
+    $pStmt->close();
+
+    // Auto-initialize user_profiles if missing
+    if (!$uProf) {
+        $initP = $conn->prepare("INSERT INTO user_profiles (user_id, full_name, age, gender, height_cm, weight_kg, phone, avatar_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE full_name = VALUES(full_name)");
+        $initP->bind_param("isisddss", $userId, $user["full_name"], $user["age"], $user["gender"], $user["height"], $user["weight"], $user["phone"], $user["profile_image"]);
+        $initP->execute();
+        $initP->close();
+
+        $pStmt2 = $conn->prepare("SELECT user_id, full_name, age, gender, height_cm, weight_kg, blood_group, phone, avatar_url, updated_at FROM user_profiles WHERE user_id = ? LIMIT 1");
+        $pStmt2->bind_param("i", $userId);
+        $pStmt2->execute();
+        $uProf = $pStmt2->get_result()->fetch_assoc();
+        $pStmt2->close();
+    }
+
+    // 3. Fetch from user_health_goals
+    $gStmt = $conn->prepare("SELECT user_id, primary_goal, target_steps, target_sleep_hours, target_water_ml, target_weight_kg, target_calories, updated_at FROM user_health_goals WHERE user_id = ? LIMIT 1");
+    $gStmt->bind_param("i", $userId);
+    $gStmt->execute();
+    $uGoals = $gStmt->get_result()->fetch_assoc();
+    $gStmt->close();
+
+    if (!$uGoals) {
+        $primary = !empty($user["primary_goal"]) ? $user["primary_goal"] : null;
+        $initG = $conn->prepare("INSERT INTO user_health_goals (user_id, primary_goal) VALUES (?, ?) ON DUPLICATE KEY UPDATE primary_goal = VALUES(primary_goal)");
+        $initG->bind_param("is", $userId, $primary);
+        $initG->execute();
+        $initG->close();
+
+        $gStmt2 = $conn->prepare("SELECT user_id, primary_goal, target_steps, target_sleep_hours, target_water_ml, target_weight_kg, target_calories, updated_at FROM user_health_goals WHERE user_id = ? LIMIT 1");
+        $gStmt2->bind_param("i", $userId);
+        $gStmt2->execute();
+        $uGoals = $gStmt2->get_result()->fetch_assoc();
+        $gStmt2->close();
+    }
+
+    // 4. Fetch from user_app_settings
+    $sStmt = $conn->prepare("SELECT user_id, push_notifications, vital_alerts, daily_reminders, metric_units, dark_mode, data_sync_interval, updated_at FROM user_app_settings WHERE user_id = ? LIMIT 1");
+    $sStmt->bind_param("i", $userId);
+    $sStmt->execute();
+    $uSettings = $sStmt->get_result()->fetch_assoc();
+    $sStmt->close();
+
+    if (!$uSettings) {
+        $initS = $conn->prepare("INSERT INTO user_app_settings (user_id) VALUES (?) ON DUPLICATE KEY UPDATE user_id = user_id");
+        $initS->bind_param("i", $userId);
+        $initS->execute();
+        $initS->close();
+
+        $sStmt2 = $conn->prepare("SELECT user_id, push_notifications, vital_alerts, daily_reminders, metric_units, dark_mode, data_sync_interval, updated_at FROM user_app_settings WHERE user_id = ? LIMIT 1");
+        $sStmt2->bind_param("i", $userId);
+        $sStmt2->execute();
+        $uSettings = $sStmt2->get_result()->fetch_assoc();
+        $sStmt2->close();
+    }
+
+    $conn->close();
+
     respond(200, [
         "success" => true,
+        "status" => "success",
         "message" => "Profile fetched successfully",
-        "profile" => buildProfileResponse($user)
+        "profile" => buildProfileResponse($user, $uProf),
+        "health_goals" => [
+            "user_id" => (int)$uGoals["user_id"],
+            "primary_goal" => $uGoals["primary_goal"],
+            "target_steps" => (int)$uGoals["target_steps"],
+            "target_sleep_hours" => (float)$uGoals["target_sleep_hours"],
+            "target_water_ml" => (int)$uGoals["target_water_ml"],
+            "target_weight_kg" => $uGoals["target_weight_kg"] !== null ? (float)$uGoals["target_weight_kg"] : null,
+            "target_calories" => (int)$uGoals["target_calories"],
+            "updated_at" => $uGoals["updated_at"]
+        ],
+        "app_settings" => [
+            "user_id" => (int)$uSettings["user_id"],
+            "push_notifications" => (bool)$uSettings["push_notifications"],
+            "vital_alerts" => (bool)$uSettings["vital_alerts"],
+            "daily_reminders" => (bool)$uSettings["daily_reminders"],
+            "metric_units" => $uSettings["metric_units"] ?: "metric",
+            "dark_mode" => (bool)$uSettings["dark_mode"],
+            "data_sync_interval" => (int)($uSettings["data_sync_interval"] ?? 15),
+            "updated_at" => $uSettings["updated_at"]
+        ]
     ]);
 }
 
@@ -131,173 +220,131 @@ if ($method === "POST" || $method === "PUT") {
         $data = $_POST;
     }
 
-    if (!is_array($data) || empty($data)) {
-        respond(400, [
-            "success" => false,
-            "message" => "Invalid or empty update data"
-        ]);
-    }
-
     $userId = isset($data["user_id"]) ? (int)$data["user_id"] : (isset($data["id"]) ? (int)$data["id"] : (isset($_GET["user_id"]) ? (int)$_GET["user_id"] : (isset($_GET["id"]) ? (int)$_GET["id"] : 0)));
     $email = strtolower(trim($data["email"] ?? $_GET["email"] ?? ""));
 
     if ($userId <= 0 && $email === "") {
         respond(400, [
             "success" => false,
-            "message" => "user_id or email is required to identify which profile to update"
+            "status" => "error",
+            "message" => "user_id or email is required"
         ]);
     }
 
-    // Check if user exists
+    // Verify existing user
     if ($userId > 0) {
-        $checkStmt = $conn->prepare("SELECT id, full_name, email FROM users WHERE id = ? LIMIT 1");
+        $checkStmt = $conn->prepare("SELECT id, full_name, email, phone, dob, age, gender, height, weight, activity_level, primary_goal FROM users WHERE id = ? LIMIT 1");
         $checkStmt->bind_param("i", $userId);
     } else {
-        $checkStmt = $conn->prepare("SELECT id, full_name, email FROM users WHERE email = ? LIMIT 1");
+        $checkStmt = $conn->prepare("SELECT id, full_name, email, phone, dob, age, gender, height, weight, activity_level, primary_goal FROM users WHERE email = ? LIMIT 1");
         $checkStmt->bind_param("s", $email);
     }
     $checkStmt->execute();
-    $checkResult = $checkStmt->get_result();
-    $existing = $checkResult->fetch_assoc();
+    $existing = $checkStmt->get_result()->fetch_assoc();
     $checkStmt->close();
 
     if (!$existing) {
         respond(404, [
             "success" => false,
-            "message" => "No profile found for the specified user"
+            "status" => "error",
+            "message" => "User not found"
         ]);
     }
 
     $targetUserId = (int)$existing["id"];
 
-    // Fields to update dynamically
-    $updates = [];
-    $types = "";
-    $params = [];
+    // Parse parameters
+    $name = isset($data["name"]) || isset($data["full_name"]) ? trim($data["name"] ?? $data["full_name"]) : $existing["full_name"];
+    $phone = isset($data["phone"]) ? trim((string)$data["phone"]) : $existing["phone"];
+    $gender = isset($data["gender"]) ? trim((string)$data["gender"]) : ($existing["gender"] ?: "Not Specified");
+    $bloodGroup = isset($data["blood_group"]) ? strtoupper(trim((string)$data["blood_group"])) : null;
+    $dob = isset($data["dob"]) ? trim((string)$data["dob"]) : $existing["dob"];
 
-    if (isset($data["name"]) || isset($data["full_name"])) {
-        $name = trim($data["name"] ?? $data["full_name"]);
-        if ($name !== "" && mb_strlen($name) <= 100) {
-            $updates[] = "full_name = ?";
-            $types .= "s";
-            $params[] = $name;
+    $age = isset($data["age"]) && is_numeric($data["age"]) ? (int)$data["age"] : ($existing["age"] !== null ? (int)$existing["age"] : 24);
+    if (!isset($data["age"]) && !empty($dob)) {
+        if (preg_match('/\b(19\d\d|20\d\d)\b/', $dob, $matches)) {
+            $birthYear = (int)$matches[1];
+            $currentYear = (int)date("Y");
+            $age = max(1, min(120, $currentYear - $birthYear));
         }
     }
 
-    if (isset($data["phone"])) {
-        $updates[] = "phone = ?";
-        $types .= "s";
-        $params[] = trim((string)$data["phone"]);
+    $height = null;
+    if (isset($data["height_cm"]) && is_numeric($data["height_cm"])) {
+        $height = (float)$data["height_cm"];
+    } elseif (isset($data["height"]) && is_numeric($data["height"])) {
+        $height = (float)$data["height"];
+    } elseif ($existing["height"] !== null) {
+        $height = (float)$existing["height"];
+    } else {
+        $height = null;
     }
 
-    if (isset($data["dob"])) {
-        $dobVal = trim((string)$data["dob"]);
-        $updates[] = "dob = ?";
-        $types .= "s";
-        $params[] = $dobVal;
-
-        // Auto compute age if not explicitly set
-        if (!isset($data["age"]) && !empty($dobVal)) {
-            if (preg_match('/\b(19\d\d|20\d\d)\b/', $dobVal, $matches)) {
-                $birthYear = (int)$matches[1];
-                $currentYear = (int)date("Y");
-                $calculatedAge = max(1, min(120, $currentYear - $birthYear));
-                $updates[] = "age = ?";
-                $types .= "i";
-                $params[] = $calculatedAge;
-            }
-        }
+    $weight = null;
+    if (isset($data["weight_kg"]) && is_numeric($data["weight_kg"])) {
+        $weight = (float)$data["weight_kg"];
+    } elseif (isset($data["weight"]) && is_numeric($data["weight"])) {
+        $weight = (float)$data["weight"];
+    } elseif ($existing["weight"] !== null) {
+        $weight = (float)$existing["weight"];
+    } else {
+        $weight = null;
     }
 
-    if (isset($data["age"])) {
-        $ageVal = (int)$data["age"];
-        if ($ageVal > 0 && $ageVal <= 130) {
-            $updates[] = "age = ?";
-            $types .= "i";
-            $params[] = $ageVal;
-        }
-    }
+    $activityLevel = isset($data["activity_level"]) ? trim((string)$data["activity_level"]) : $existing["activity_level"];
+    $primaryGoal = isset($data["primary_goal"]) ? trim((string)$data["primary_goal"]) : $existing["primary_goal"];
 
-    if (isset($data["gender"])) {
-        $updates[] = "gender = ?";
-        $types .= "s";
-        $params[] = trim((string)$data["gender"]);
-    }
-
-    if (isset($data["height"])) {
-        $updates[] = "height = ?";
-        $types .= "d";
-        $params[] = (float)$data["height"];
-    }
-
-    if (isset($data["weight"])) {
-        $updates[] = "weight = ?";
-        $types .= "d";
-        $params[] = (float)$data["weight"];
-    }
-
-    if (isset($data["activity_level"])) {
-        $updates[] = "activity_level = ?";
-        $types .= "s";
-        $params[] = trim((string)$data["activity_level"]);
-    }
-
-    if (isset($data["primary_goal"])) {
-        $updates[] = "primary_goal = ?";
-        $types .= "s";
-        $params[] = trim((string)$data["primary_goal"]);
-    }
-
-    if (empty($updates)) {
-        respond(400, [
-            "success" => false,
-            "message" => "No valid fields provided to update"
-        ]);
-    }
-
-    $sql = "UPDATE users SET " . implode(", ", $updates) . " WHERE id = ?";
-    $types .= "i";
-    $params[] = $targetUserId;
-
-    $stmt = $conn->prepare($sql);
-    if (!$stmt) {
-        respond(500, [
-            "success" => false,
-            "message" => "Database statement preparation failed: " . $conn->error
-        ]);
-    }
-
-    $stmt->bind_param($types, ...$params);
-
-    if (!$stmt->execute()) {
-        respond(500, [
-            "success" => false,
-            "message" => "Failed to update profile: " . $stmt->error
-        ]);
-    }
-    $stmt->close();
-
-    // Fetch the updated profile to return
-    $fetchStmt = $conn->prepare(
-        "SELECT id, full_name, email, phone, dob, age, gender, height, weight, activity_level, primary_goal, profile_image, created_at, updated_at
-         FROM users
-         WHERE id = ?
-         LIMIT 1"
+    // 1. Update users table
+    $uUp = $conn->prepare(
+        "UPDATE users SET full_name = ?, phone = ?, dob = ?, age = ?, gender = ?, height = ?, weight = ?, activity_level = ?, primary_goal = ? WHERE id = ?"
     );
-    $fetchStmt->bind_param("i", $targetUserId);
-    $fetchStmt->execute();
-    $updatedUser = $fetchStmt->get_result()->fetch_assoc();
-    $fetchStmt->close();
+    $uUp->bind_param("sssisddssi", $name, $phone, $dob, $age, $gender, $height, $weight, $activityLevel, $primaryGoal, $targetUserId);
+    $uUp->execute();
+    $uUp->close();
+
+    // 2. Upsert into user_profiles table
+    $avatarUrl = isset($data["avatar_url"]) ? trim((string)$data["avatar_url"]) : null;
+    $pUp = $conn->prepare(
+        "INSERT INTO user_profiles (user_id, full_name, age, gender, height_cm, weight_kg, blood_group, phone, avatar_url)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+             full_name = VALUES(full_name),
+             age = VALUES(age),
+             gender = VALUES(gender),
+             height_cm = VALUES(height_cm),
+             weight_kg = VALUES(weight_kg),
+             blood_group = COALESCE(VALUES(blood_group), blood_group),
+             phone = VALUES(phone),
+             avatar_url = COALESCE(VALUES(avatar_url), avatar_url)"
+    );
+    $pUp->bind_param("isisddsss", $targetUserId, $name, $age, $gender, $height, $weight, $bloodGroup, $phone, $avatarUrl);
+    $pUp->execute();
+    $pUp->close();
+
+    // Fetch updated records
+    $fetchU = $conn->prepare("SELECT id, full_name, email, phone, dob, age, gender, height, weight, activity_level, primary_goal, profile_image, created_at, updated_at FROM users WHERE id = ? LIMIT 1");
+    $fetchU->bind_param("i", $targetUserId);
+    $fetchU->execute();
+    $updatedUser = $fetchU->get_result()->fetch_assoc();
+    $fetchU->close();
+
+    $fetchP = $conn->prepare("SELECT user_id, full_name, age, gender, height_cm, weight_kg, blood_group, phone, avatar_url, updated_at FROM user_profiles WHERE user_id = ? LIMIT 1");
+    $fetchP->bind_param("i", $targetUserId);
+    $fetchP->execute();
+    $updatedProf = $fetchP->get_result()->fetch_assoc();
+    $fetchP->close();
     $conn->close();
 
     respond(200, [
         "success" => true,
+        "status" => "success",
         "message" => "Profile updated successfully",
-        "profile" => buildProfileResponse($updatedUser)
+        "profile" => buildProfileResponse($updatedUser, $updatedProf)
     ]);
 }
 
 respond(405, [
     "success" => false,
-    "message" => "Method not allowed. Use GET or POST/PUT"
+    "status" => "error",
+    "message" => "Method not allowed. Use GET, POST, or PUT."
 ]);

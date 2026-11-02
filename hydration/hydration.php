@@ -20,8 +20,8 @@ if ($method === "GET") {
     $remindersEnabled = $goalRow ? (bool)$goalRow["reminders_enabled"] : true;
 
     // Get logs for date
-    $lStmt = $conn->prepare("SELECT id, amount_ml, logged_at FROM hydration_logs WHERE user_id = ? AND date_string = ? ORDER BY logged_at ASC");
-    $lStmt->bind_param("is", $userId, $date);
+    $lStmt = $conn->prepare("SELECT id, COALESCE(volume_ml, amount_ml, intake_ml, 0) as amount_ml, logged_at FROM hydration_logs WHERE user_id = ? AND (date_string = ? OR log_date = ?) ORDER BY logged_at ASC");
+    $lStmt->bind_param("iss", $userId, $date, $date);
     $lStmt->execute();
     $lRes = $lStmt->get_result();
 
@@ -46,18 +46,22 @@ if ($method === "GET") {
     $glassEquivalent = round($totalConsumed / 250, 1);
     $progressPercent = $targetMl > 0 ? min(100, (int)(($totalConsumed / $targetMl) * 100)) : 0;
 
-    // Weekly history (7 days: Monday to Sunday of the current week)
+    // Weekly history (7 days: Monday to Sunday of the current week based on system date)
     $dayOfWeek = (int)date("N", strtotime($date));
     $monday = date("Y-m-d", strtotime($date . " - " . ($dayOfWeek - 1) . " days"));
     $sunday = date("Y-m-d", strtotime($monday . " + 6 days"));
 
     $wStmt = $conn->prepare(
-        "SELECT date_string, SUM(amount_ml) as total_ml 
+        "SELECT COALESCE(log_date, logged_date, date_string) as date_string, SUM(COALESCE(volume_ml, amount_ml, intake_ml, 0)) as total_ml 
          FROM hydration_logs 
-         WHERE user_id = ? AND date_string BETWEEN ? AND ? 
-         GROUP BY date_string"
+         WHERE user_id = ? AND (
+             (date_string BETWEEN ? AND ?) OR 
+             (log_date BETWEEN ? AND ?) OR 
+             (logged_date BETWEEN ? AND ?)
+         ) 
+         GROUP BY COALESCE(log_date, logged_date, date_string)"
     );
-    $wStmt->bind_param("iss", $userId, $monday, $sunday);
+    $wStmt->bind_param("issssss", $userId, $monday, $sunday, $monday, $sunday, $monday, $sunday);
     $wStmt->execute();
     $wRes = $wStmt->get_result();
     $dailyTotals = [];
@@ -72,24 +76,23 @@ if ($method === "GET") {
     for ($i = 0; $i < 7; $i++) {
         $dStr = date("Y-m-d", strtotime($monday . " + $i days"));
         $dConsumed = 0;
-        if (isset($dailyTotals[$dStr])) {
+        $hasLog = false;
+        if (isset($dailyTotals[$dStr]) && $dailyTotals[$dStr] > 0) {
             $dConsumed = $dailyTotals[$dStr];
-        } elseif ($dStr === $date) {
+            $hasLog = true;
+        } elseif ($dStr === $date && $totalConsumed > 0) {
             $dConsumed = $totalConsumed;
-        } elseif (strtotime($dStr) < strtotime($today)) {
-            // Sample historical data for past days of this week if unlogged
-            $sampleRatios = [0.55, 0.75, 0.60, 0.85, 0.50, 0.90, 0.65];
-            $dConsumed = (int)round($targetMl * ($sampleRatios[$i] ?? 0.5));
+            $hasLog = true;
         }
 
-        $ratio = $targetMl > 0 ? min(1.0, round($dConsumed / $targetMl, 2)) : 0.0;
+        $ratio = ($hasLog && $targetMl > 0) ? min(1.0, round($dConsumed / $targetMl, 2)) : null;
         $weeklyHistory[] = [
             "day" => $dayNames[$i],
-            "date" => $dStr,
-            "consumed_ml" => $dConsumed,
+            "date" => date("M d", strtotime($dStr)),
+            "consumed_ml" => $hasLog ? $dConsumed : null,
             "target_ml" => $targetMl,
             "ratio" => $ratio,
-            "is_today" => ($dStr === $date)
+            "is_today" => ($dStr === $today)
         ];
     }
 
@@ -116,14 +119,14 @@ if ($method === "POST") {
         $date = !empty($data["date_string"]) ? trim((string)$data["date_string"]) : (!empty($data["date"]) ? trim((string)$data["date"]) : $today);
 
         // Delete previous logs for this date
-        $delStmt = $conn->prepare("DELETE FROM hydration_logs WHERE user_id = ? AND date_string = ?");
-        $delStmt->bind_param("is", $userId, $date);
+        $delStmt = $conn->prepare("DELETE FROM hydration_logs WHERE user_id = ? AND (date_string = ? OR log_date = ?)");
+        $delStmt->bind_param("iss", $userId, $date, $date);
         $delStmt->execute();
         $delStmt->close();
 
         // Insert explicit 0 ml marker so empty fallback doesn't trigger
-        $zeroStmt = $conn->prepare("INSERT INTO hydration_logs (user_id, date_string, amount_ml) VALUES (?, ?, 0)");
-        $zeroStmt->bind_param("is", $userId, $date);
+        $zeroStmt = $conn->prepare("INSERT INTO hydration_logs (user_id, date_string, log_date, amount_ml, volume_ml, logged_at) VALUES (?, ?, ?, 0, 0, NOW())");
+        $zeroStmt->bind_param("iss", $userId, $date, $date);
         $zeroStmt->execute();
         $zeroStmt->close();
         $conn->close();
@@ -150,6 +153,15 @@ if ($method === "POST") {
         $gStmt->bind_param("iii", $userId, $targetMl, $reminders);
         $gStmt->execute();
         $gStmt->close();
+
+        // Also update user_health_goals
+        $hgStmt = $conn->prepare("INSERT INTO user_health_goals (user_id, target_water_ml) VALUES (?, ?) ON DUPLICATE KEY UPDATE target_water_ml = VALUES(target_water_ml)");
+        if ($hgStmt) {
+            $hgStmt->bind_param("ii", $userId, $targetMl);
+            $hgStmt->execute();
+            $hgStmt->close();
+        }
+
         $conn->close();
 
         respondJson(200, [
@@ -161,7 +173,7 @@ if ($method === "POST") {
     }
 
     // Option 3: Log water consumption (+250 ml, custom ml)
-    $amountMl = isset($data["amount_ml"]) ? (int)$data["amount_ml"] : (isset($data["amount"]) ? (int)$data["amount"] : 0);
+    $amountMl = isset($data["amount_ml"]) ? (int)$data["amount_ml"] : (isset($data["volume_ml"]) ? (int)$data["volume_ml"] : (isset($data["amount"]) ? (int)$data["amount"] : 0));
     $date = !empty($data["date_string"]) ? trim((string)$data["date_string"]) : (!empty($data["date"]) ? trim((string)$data["date"]) : $today);
 
     if ($amountMl < 0 || $amountMl > 5000) {
@@ -173,13 +185,13 @@ if ($method === "POST") {
 
     if ($amountMl === 0) {
         // Explicit 0 ml reset
-        $delStmt = $conn->prepare("DELETE FROM hydration_logs WHERE user_id = ? AND date_string = ?");
-        $delStmt->bind_param("is", $userId, $date);
+        $delStmt = $conn->prepare("DELETE FROM hydration_logs WHERE user_id = ? AND (date_string = ? OR log_date = ?)");
+        $delStmt->bind_param("iss", $userId, $date, $date);
         $delStmt->execute();
         $delStmt->close();
 
-        $zeroStmt = $conn->prepare("INSERT INTO hydration_logs (user_id, date_string, amount_ml) VALUES (?, ?, 0)");
-        $zeroStmt->bind_param("is", $userId, $date);
+        $zeroStmt = $conn->prepare("INSERT INTO hydration_logs (user_id, date_string, log_date, amount_ml, volume_ml, logged_at) VALUES (?, ?, ?, 0, 0, NOW())");
+        $zeroStmt->bind_param("iss", $userId, $date, $date);
         $zeroStmt->execute();
         $zeroStmt->close();
         $conn->close();
@@ -193,16 +205,16 @@ if ($method === "POST") {
         ]);
     }
 
-    $stmt = $conn->prepare("INSERT INTO hydration_logs (user_id, date_string, amount_ml) VALUES (?, ?, ?)");
-    $stmt->bind_param("isi", $userId, $date, $amountMl);
+    $stmt = $conn->prepare("INSERT INTO hydration_logs (user_id, date_string, log_date, amount_ml, volume_ml, logged_at) VALUES (?, ?, ?, ?, ?, NOW())");
+    $stmt->bind_param("issii", $userId, $date, $date, $amountMl, $amountMl);
 
     if ($stmt->execute()) {
         $newId = $stmt->insert_id;
         $stmt->close();
 
         // Calculate new daily total
-        $totStmt = $conn->prepare("SELECT SUM(amount_ml) as total FROM hydration_logs WHERE user_id = ? AND date_string = ?");
-        $totStmt->bind_param("is", $userId, $date);
+        $totStmt = $conn->prepare("SELECT SUM(COALESCE(volume_ml, amount_ml, intake_ml, 0)) as total FROM hydration_logs WHERE user_id = ? AND (date_string = ? OR log_date = ?)");
+        $totStmt->bind_param("iss", $userId, $date, $date);
         $totStmt->execute();
         $newTotal = (int)$totStmt->get_result()->fetch_assoc()["total"];
         $totStmt->close();

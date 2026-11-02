@@ -28,34 +28,6 @@ if ($method === "GET") {
         ];
     }
     $stmt->close();
-
-    // Seed sample notifications if empty
-    if (empty($notifs)) {
-        $seed = [
-            ["Time to drink water", "Your hydration goal is 62% complete.", "💧", 0],
-            ["Activity Reminder", "You have 1,755 steps left to hit your goal.", "👟", 0],
-            ["Sleep Analysis Ready", "You reached 80% sleep score with optimal deep sleep.", "🌙", 1],
-            ["Weekly Report Generated", "Your comprehensive wellness overview is ready to view.", "📊", 1]
-        ];
-
-        $ins = $conn->prepare("INSERT INTO notifications (user_id, title, description, icon, is_read) VALUES (?, ?, ?, ?, ?)");
-        foreach ($seed as $s) {
-            $ins->bind_param("isssi", $userId, $s[0], $s[1], $s[2], $s[3]);
-            $ins->execute();
-            $notifs[] = [
-                "id" => (int)$ins->insert_id,
-                "title" => $s[0],
-                "description" => $s[1],
-                "icon" => $s[2],
-                "is_read" => (bool)$s[3],
-                "created_at" => date("Y-m-d H:i:s"),
-                "time_ago" => "Recent"
-            ];
-            if (!$s[3]) $unreadCount++;
-        }
-        $ins->close();
-    }
-
     $conn->close();
 
     respondJson(200, [
@@ -106,4 +78,3 @@ if ($method === "POST") {
 }
 
 respondJson(405, ["success" => false, "message" => "Method not allowed"]);
-

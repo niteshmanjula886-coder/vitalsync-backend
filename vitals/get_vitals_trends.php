@@ -1,0 +1,3 @@
+<?php
+require_once __DIR__ . "/../api/vitals/get_vitals_trends.php";
+

@@ -70,40 +70,6 @@ if ($method === "GET") {
         ];
     }
     $stmt->close();
-
-    // If no reminders exist yet, seed default standard reminders from the UI
-    if (empty($reminders)) {
-        $defaults = [
-            ["Drink Water", "08:00 AM", "Every day", "0,1,2,3,4,5,6", 1, 1],
-            ["Exercise", "06:30 PM", "Mon, Wed, Fri", "1,3,5", 1, 1],
-            ["Sleep", "10:30 PM", "Every day", "0,1,2,3,4,5,6", 1, 1],
-            ["Medication", "09:00 AM", "Every day", "0,1,2,3,4,5,6", 1, 1]
-        ];
-
-        $insertStmt = $conn->prepare(
-            "INSERT INTO reminders (user_id, title, time, frequency, repeat_days, sound_vibration, is_enabled)
-             VALUES (?, ?, ?, ?, ?, ?, ?)"
-        );
-
-        foreach ($defaults as $d) {
-            $insertStmt->bind_param("issssii", $uid, $d[0], $d[1], $d[2], $d[3], $d[4], $d[5]);
-            $insertStmt->execute();
-            $newId = $insertStmt->insert_id;
-            $reminders[] = [
-                "id" => (int)$newId,
-                "title" => $d[0],
-                "time" => $d[1],
-                "frequency" => $d[2],
-                "repeat_days" => $d[3],
-                "sound_vibration" => (bool)$d[4],
-                "is_enabled" => (bool)$d[5],
-                "created_at" => date("Y-m-d H:i:s"),
-                "updated_at" => date("Y-m-d H:i:s")
-            ];
-        }
-        $insertStmt->close();
-    }
-
     $conn->close();
 
     respond(200, [
