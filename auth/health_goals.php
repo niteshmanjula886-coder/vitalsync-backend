@@ -42,27 +42,41 @@ function resolveUser($conn, $input) {
 $availableGoals = [
     [
         "id" => "1",
-        "title" => "Fitness",
-        "badge" => "Improve Fitness",
-        "description" => "Build a consistent routine and improve fitness.",
-        "icon_type" => "FITNESS"
+        "title" => "Build Muscle",
+        "badge" => "Build Muscle",
+        "description" => "Increase strength and lean muscle mass",
+        "icon_type" => "MUSCLE"
     ],
     [
         "id" => "2",
+        "title" => "Weight Loss",
+        "badge" => "Weight Loss",
+        "description" => "Burn fat and maintain a calorie deficit",
+        "icon_type" => "WEIGHT"
+    ],
+    [
+        "id" => "3",
+        "title" => "Improve Fitness",
+        "badge" => "Improve Fitness",
+        "description" => "General health, endurance, and daily activity",
+        "icon_type" => "FITNESS"
+    ],
+    [
+        "id" => "4",
+        "title" => "Endurance",
+        "badge" => "Endurance",
+        "description" => "Stamina and cardiovascular performance",
+        "icon_type" => "TIMER"
+    ],
+    [
+        "id" => "5",
         "title" => "Better Sleep",
         "badge" => "Better Sleep",
         "description" => "Create a calmer, more regular sleep routine.",
         "icon_type" => "SLEEP"
     ],
     [
-        "id" => "3",
-        "title" => "Weight Management",
-        "badge" => "Weight Management",
-        "description" => "Track changes and build sustainable habits.",
-        "icon_type" => "WEIGHT"
-    ],
-    [
-        "id" => "4",
+        "id" => "6",
         "title" => "General Wellness",
         "badge" => "General Wellness",
         "description" => "Find balance in your daily wellbeing.",
