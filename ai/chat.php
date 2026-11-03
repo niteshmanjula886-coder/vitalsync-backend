@@ -1,5 +1,6 @@
 <?php
 
+set_time_limit(180);
 require_once __DIR__ . "/../config/auth_middleware.php";
 require_once __DIR__ . "/ollama_service.php";
 
@@ -82,12 +83,12 @@ if ($method === "POST") {
     $uStmt->close();
 
     // 2. Perform RAG Knowledge Base Retrieval
-    $ragArticles = searchKnowledgeBase($conn, $userText, 2);
+    $ragArticles = searchKnowledgeBase($conn, $userText, 1);
 
     // 3. Detect intent and fetch health context
     $isPersonalHealth = isUserPersonalHealthQuery($userText);
     $healthContext = fetchUserHealthContext($conn, $userId);
-    $historyMessages = loadConversationHistory($conn, $userId, 8);
+    $historyMessages = loadConversationHistory($conn, $userId, 4);
 
     // 4. Build general-purpose, RAG-grounded system prompt
     $systemPrompt = buildGeneralAiSystemPrompt($healthContext, $ragArticles, $isPersonalHealth);

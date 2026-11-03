@@ -9,7 +9,7 @@
 define("OLLAMA_BASE_URL", "http://127.0.0.1:11434");
 define("PRIMARY_MODEL", "qwen3:4b");
 define("FALLBACK_MODEL", "qwen2.5:1.5b");
-define("OLLAMA_TIMEOUT_SECONDS", 12);
+define("OLLAMA_TIMEOUT_SECONDS", 120);
 
 /**
  * Checks if Ollama daemon is reachable.
@@ -59,7 +59,8 @@ function callOllamaChat(array $messages, $systemPrompt = "") {
             "options" => [
                 "temperature" => 0.7,
                 "top_p" => 0.9,
-                "num_predict" => 350
+                "num_predict" => 600,
+                "num_gpu" => 0
             ]
         ]);
 
@@ -86,9 +87,19 @@ function callOllamaChat(array $messages, $systemPrompt = "") {
         }
 
         $decoded = json_decode($rawResponse, true);
-        if (isset($decoded["message"]["content"]) && trim($decoded["message"]["content"]) !== "") {
+        $content = trim($decoded["message"]["content"] ?? "");
+        if ($content !== "") {
             return [
-                "text" => trim($decoded["message"]["content"]),
+                "text" => $content,
+                "model" => $model,
+                "eval_count" => $decoded["eval_count"] ?? 0,
+                "total_duration" => $decoded["total_duration"] ?? 0
+            ];
+        }
+        $thinking = trim($decoded["message"]["thinking"] ?? "");
+        if ($thinking !== "") {
+            return [
+                "text" => $thinking,
                 "model" => $model,
                 "eval_count" => $decoded["eval_count"] ?? 0,
                 "total_duration" => $decoded["total_duration"] ?? 0
@@ -133,7 +144,8 @@ function streamOllamaChat(array $messages, $systemPrompt, callable $chunkCallbac
         "options" => [
             "temperature" => 0.7,
             "top_p" => 0.9,
-            "num_predict" => 400
+            "num_predict" => 600,
+            "num_gpu" => 0
         ]
     ]);
 
@@ -145,19 +157,20 @@ function streamOllamaChat(array $messages, $systemPrompt, callable $chunkCallbac
             "Content-Type: application/json",
             "Content-Length: " . strlen($payload)
         ],
-        CURLOPT_TIMEOUT => 45,
+        CURLOPT_TIMEOUT => 120,
         CURLOPT_CONNECTTIMEOUT => 3,
         CURLOPT_WRITEFUNCTION => function($curlHandle, $data) use ($chunkCallback) {
-            $lines = explode("
-", $data);
+            $lines = explode("\n", $data);
             foreach ($lines as $line) {
                 $line = trim($line);
                 if (empty($line)) continue;
                 $decoded = json_decode($line, true);
-                if (isset($decoded["message"]["content"])) {
-                    $chunk = $decoded["message"]["content"];
+                if ($decoded) {
+                    $chunk = $decoded["message"]["content"] ?? "";
                     $isDone = $decoded["done"] ?? false;
-                    $chunkCallback($chunk, $isDone);
+                    if (!empty($chunk) || $isDone) {
+                        $chunkCallback($chunk, $isDone);
+                    }
                 }
             }
             return strlen($data);
@@ -485,7 +498,7 @@ function fetchUserHealthContext($conn, $userId) {
 /**
  * Builds an unrestricted, versatile general-purpose system prompt with optional RAG injection.
  */
-function buildGeneralAiSystemPrompt(array $ctx, array $ragArticles = [], $includeVitals = false) {
+function buildGeneralAiSystemPrompt(array $ctx = [], array $ragArticles = [], $includeVitals = false) {
     $prompt = <<<EOT
 You are VitalSync AI, a highly capable, empathetic, and unrestricted general-purpose AI assistant comparable to ChatGPT.
 
