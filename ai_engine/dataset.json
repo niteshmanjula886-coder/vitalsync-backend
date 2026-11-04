@@ -1,0 +1,629 @@
+{
+  "intents": [
+    {
+      "tag": "med_cardio_hypertension",
+      "patterns": [
+        "what is high blood pressure",
+        "blood pressure reading is high",
+        "hypertension guidelines and stages",
+        "how to lower high blood pressure naturally",
+        "what causes hypertension",
+        "is 140 over 90 high blood pressure",
+        "symptoms of elevated blood pressure",
+        "what is normal blood pressure",
+        "bp reading explanation",
+        "hypertensive crisis signs"
+      ],
+      "responses": [
+        "**Clinical Guidelines on Blood Pressure & Hypertension:**\n\n1. **Standard Stages (AHA/ACC):**\n   - **Normal:** Under 120/80 mmHg\n   - **Elevated:** 120\u2013129 / <80 mmHg\n   - **Stage 1 Hypertension:** 130\u2013139 / 80\u201389 mmHg\n   - **Stage 2 Hypertension:** \u2265 140/90 mmHg\n   - **Hypertensive Crisis:** > 180/120 mmHg (Requires immediate emergency medical care!)\n\n2. **Evidence-Based Lifestyle Reductions:**\n   - **DASH Diet:** High potassium (leafy greens, bananas), low sodium (<2,300 mg/day, ideally <1,500 mg).\n   - **Aerobic Exercise:** 150 mins/week lowers systolic BP by 5\u20138 mmHg.\n   - **Weight & Alcohol:** Every 1 kg weight loss reduces BP by ~1 mmHg.",
+        "Blood pressure measures arterial resistance during cardiac contraction (systolic) and relaxation (diastolic). Your VitalSync profile logs your recorded pressure at **{blood_pressure}**. Consistent systolic pressure \u2265130 mmHg indicates hypertension requiring dietary sodium reduction, regular cardio, and physician consultation."
+      ]
+    },
+    {
+      "tag": "med_cardio_hypotension",
+      "patterns": [
+        "what is low blood pressure",
+        "feeling dizzy when standing up",
+        "blood pressure is too low 90 60",
+        "hypotension causes and symptoms",
+        "orthostatic hypotension explained",
+        "low blood pressure remedies",
+        "why is my bp below 90"
+      ],
+      "responses": [
+        "**Understanding Low Blood Pressure (Hypotension):**\n\n- **Clinical Definition:** Blood pressure readings consistently below **90/60 mmHg**.\n- **Orthostatic Hypotension:** Dizziness or lightheadedness when abruptly standing from sitting/lying down, caused by temporary pooling of blood in lower extremities.\n- **Common Triggers:** Dehydration, prolonged bed rest, electrolyte depletion, or certain medications.\n- **Practical Measures:**\n  1. Drink adequate fluids and ensure sufficient dietary sodium (unless medically restricted).\n  2. Stand up gradually in stages.\n  3. Wear compression stockings if recommended by your doctor.\n  4. Seek medical attention if accompanied by fainting (syncope), blurred vision, or chest pain."
+      ]
+    },
+    {
+      "tag": "med_cardio_tachycardia",
+      "patterns": [
+        "heart is racing very fast",
+        "resting heart rate over 100",
+        "what is tachycardia",
+        "heart palpitations causes",
+        "why is my pulse so fast",
+        "rapid heartbeat while resting",
+        "pulse is 110 bpm resting"
+      ],
+      "responses": [
+        "**Tachycardia & Elevated Resting Pulse:**\n\n- **Definition:** A resting heart rate exceeding **100 beats per minute (BPM)** in adults.\n- **Common Non-Cardiac Causes:** Acute stress/anxiety, caffeine excess, dehydration, fever/infection, nicotine, or thyroid hyperactivity.\n- **Vagal Maneuvers:** Gentle physiological vagal stimulation (the physiological sigh, 4-4-4-4 breathing, splashing cold water on the face) can help downregulate sinus tachycardia.\n- **Urgent Red Flags:** If a racing pulse is accompanied by chest tightness, shortness of breath, dizziness, or syncope, seek immediate emergency clinical evaluation."
+      ]
+    },
+    {
+      "tag": "med_cardio_cholesterol",
+      "patterns": [
+        "what is high cholesterol",
+        "ldl vs hdl cholesterol",
+        "how to lower ldl cholesterol",
+        "lipid panel test results explained",
+        "triglycerides levels and diet",
+        "good and bad cholesterol difference",
+        "cholesterol targets"
+      ],
+      "responses": [
+        "**Lipid Panel Targets & Cardiovascular Risk:**\n\n1. **Lipid Biomarker Baselines:**\n   - **Total Cholesterol:** Desirably < 200 mg/dL\n   - **LDL ('Bad' Cholesterol):** Optimal < 100 mg/dL (or < 70 mg/dL for high-risk patients)\n   - **HDL ('Good' Protective):** Desirably > 40 mg/dL (men) or > 50 mg/dL (women)\n   - **Triglycerides:** Optimal < 150 mg/dL\n\n2. **Evidence-Based Dietary Adjustments:**\n   - **Soluble Fiber:** Oats, psyllium husk, legumes, and apples bind intestinal bile acids, lowering circulating LDL.\n   - **Healthy Fats:** Replace saturated fats (fatty red meat, butter) with monounsaturated fats (extra virgin olive oil, avocados, almonds).\n   - **Omega-3s:** Fatty cold-water fish (salmon, sardines) reduce serum triglycerides by 15\u201330%."
+      ]
+    },
+    {
+      "tag": "med_resp_asthma",
+      "patterns": [
+        "asthma symptoms and inhalers",
+        "wheezing sound when breathing",
+        "how to use rescue inhaler",
+        "asthma attack first aid",
+        "triggers for asthma",
+        "albuterol vs steroid inhaler",
+        "bronchospasm management"
+      ],
+      "responses": [
+        "**Asthma Clinical Overview & Medication Roles:**\n\n1. **Pathophysiology:** Chronic airway inflammation causing hyperreactive bronchospasm, mucus secretion, and wheezing/chest tightness.\n2. **Medication Categories:**\n   - **Rescue Inhalers (SABA, e.g., Albuterol/Salbutamol):** Rapid bronchodilation within 5 minutes for acute shortness of breath.\n   - **Controller Inhalers (ICS, e.g., Fluticasone, Budesonide):** Daily anti-inflammatory steroids to prevent attacks over time.\n3. **Acute Asthma Attack Action Plan:**\n   - Sit upright; do not lie down.\n   - Take 2 to 4 puffs of your rescue inhaler via spacer.\n   - If symptoms do not improve within 5\u201310 minutes, seek emergency medical care immediately."
+      ]
+    },
+    {
+      "tag": "med_resp_cough_cold",
+      "patterns": [
+        "how to treat common cold",
+        "cough remedies and relief",
+        "dry cough vs wet cough",
+        "cold and flu symptoms",
+        "medicine for sore throat and runny nose",
+        "how long does cold last",
+        "home remedies for cough"
+      ],
+      "responses": [
+        "**Evidence-Based Management of Upper Respiratory Infections (Colds):**\n\n1. **Expected Timeline:** Viral colds typically run their course in 7 to 10 days.\n2. **Symptomatic Relief:**\n   - **Hydration & Warm Fluids:** Thins mucus secretions and soothes inflamed pharyngeal tissue.\n   - **Honey:** Proven to reduce cough frequency and improve sleep (for individuals over 1 year of age).\n   - **Saline Nasal Irrigation:** Flushes viral particles and reduces mucosal swelling without rebound congestion.\n   - **OTC Medication:** Paracetamol/Ibuprofen for body aches/fever; Dextromethorphan for dry nocturnal cough.\n3. **When to See a Doctor:** High fever lasting >3 days, difficulty breathing, wheezing, or symptoms worsening after initial improvement."
+      ]
+    },
+    {
+      "tag": "med_resp_hypoxia_spo2",
+      "patterns": [
+        "what is normal oxygen level",
+        "spo2 reading below 95",
+        "what does pulse oximeter measure",
+        "low oxygen saturation symptoms",
+        "hypoxia warning signs",
+        "is 92 oxygen level dangerous"
+      ],
+      "responses": [
+        "**Pulse Oximetry (SpO2) & Hypoxia Clinical Standards:**\n\n- **Normal Range:** **95% to 100%** on room air at sea level.\n- **Mild Hypoxia:** **90% to 94%** (requires monitoring, rest, and medical consultation if persistent).\n- **Severe Hypoxia:** **Below 90%** (Emergency! Indicates inadequate oxygen delivery to vital organs).\n- **Symptoms of Low Oxygen:** Cyanosis (bluish tint on lips/nail beds), confusion, rapid breathing, and air hunger.\n- Your VitalSync telemetry tracks SpO2 at **{spo2}**. Seek urgent medical care if SpO2 drops below 92% alongside labored breathing."
+      ]
+    },
+    {
+      "tag": "med_gastro_gerd_acid_reflux",
+      "patterns": [
+        "acid reflux symptoms and treatment",
+        "heartburn after eating",
+        "what is gerd",
+        "how to stop acid reflux immediately",
+        "foods that trigger heartburn",
+        "antacids vs omeprazole ppi",
+        "burning feeling in chest after meals"
+      ],
+      "responses": [
+        "**Gastroesophageal Reflux Disease (GERD) & Heartburn:**\n\n1. **Mechanism:** Relaxation or weakness of the Lower Esophageal Sphincter (LES), allowing acidic stomach contents to irritate the esophagus.\n2. **Immediate Relief vs Long-Term Management:**\n   - **Antacids (Calcium Carbonate):** Fast-acting (10\u201315 mins) chemical neutralization of stomach acid.\n   - **H2 Blockers & PPIs (Famotidine, Omeprazole):** Suppress acid production for 12\u201324 hours for chronic mucosal healing.\n3. **Key Lifestyle Adjustments:**\n   - Avoid lying down within 3 hours of eating.\n   - Elevate the head of your bed by 6 inches.\n   - Moderate common triggers: citrus, caffeine, chocolate, spicy foods, and carbonated beverages."
+      ]
+    },
+    {
+      "tag": "med_gastro_nausea_vomiting",
+      "patterns": [
+        "how to treat nausea and vomiting",
+        "food poisoning recovery",
+        "what to eat after vomiting",
+        "rehydration after throwing up",
+        "brat diet for upset stomach",
+        "feeling nauseous remedies"
+      ],
+      "responses": [
+        "**Clinical Recovery from Acute Nausea & Vomiting:**\n\n1. **Rehydration (Highest Priority):**\n   - Wait 30\u201360 minutes after vomiting before drinking.\n   - Sip small amounts (1\u20132 teaspoons every 5 minutes) of Oral Rehydration Salts (ORS) or electrolyte solutions.\n2. **The BRAT Diet (When Tolerating Fluids):**\n   - **B**ananas (potassium replenishment)\n   - **R**ice (bland, easy carbohydrate)\n   - **A**pplesauce (pectin for stool binding)\n   - **T**oast (gentle starch)\n3. **Natural Antiemetics:** Ginger tea, peppermint aroma, or acupressure on the P6 wrist point.\n4. **Seek Immediate Care If:** Inability to keep fluids down for >24 hours, signs of severe dehydration, blood in vomitus, or high fever."
+      ]
+    },
+    {
+      "tag": "med_gastro_constipation_diarrhea",
+      "patterns": [
+        "how to relieve constipation fast",
+        "what causes chronic diarrhea",
+        "stool frequency and gut health",
+        "fiber supplements for bowel movement",
+        "probiotics for digestion",
+        "how to stop diarrhea"
+      ],
+      "responses": [
+        "**Digestive Transit & Bowel Regulation:**\n\n1. **Constipation Relief:**\n   - **Hydration:** Stool softening requires adequate fluid (your target is **{water_target_ml} mL/day**).\n   - **Dietary Fiber:** Aim for 25\u201335g/day (psyllium husk, chia seeds, flaxseed, lentils).\n   - **Gentle Movement:** Daily walking stimulates colonic peristalsis.\n2. **Diarrhea Management:**\n   - Prioritize electrolytes and fluid replacement to prevent hypovolemia.\n   - Avoid lactose, high-fat foods, and artificial sweeteners.\n3. **Red Flags:** Blood in stool (melena or hematochezia), involuntary weight loss, or persistent diarrhea >48 hours."
+      ]
+    },
+    {
+      "tag": "med_neuro_headache_migraine",
+      "patterns": [
+        "headache relief medicine",
+        "migraine vs tension headache",
+        "throbbing head pain on one side",
+        "aura before headache",
+        "how to get rid of migraine",
+        "sensitivity to light and sound headache",
+        "severe headache treatment"
+      ],
+      "responses": [
+        "**Clinical Headache Differentiation & Care:**\n\n1. **Tension Headache:**\n   - **Symptoms:** Dull, continuous ache resembling a tight band around the forehead or occipital neck.\n   - **Triggers:** Stress, neck muscle spasm, eye strain, dehydration.\n   - **Treatment:** Rest, hydration, neck stretching, Acetaminophen or Ibuprofen.\n\n2. **Migraine:**\n   - **Symptoms:** Moderate-to-severe unilateral throbbing pain, often accompanied by nausea, photophobia (light sensitivity), and visual aura.\n   - **Treatment:** Early intervention with NSAIDs or prescription Triptans (Sumatriptan); rest in a dark, quiet room.\n\n3. **Emergency Warning ('Thunderclap Headache'):** A sudden, excruciating headache that peaks within 60 seconds requires immediate 911/emergency evaluation to rule out subarachnoid hemorrhage."
+      ]
+    },
+    {
+      "tag": "med_neuro_dizziness_vertigo",
+      "patterns": [
+        "room is spinning vertigo",
+        "feeling lightheaded and dizzy",
+        "what causes vertigo",
+        "bppv inner ear crystals",
+        "dizziness when turning head in bed",
+        "how to stop vertigo"
+      ],
+      "responses": [
+        "**Vertigo & Dizziness Clinical Breakdown:**\n\n- **Vertigo:** The false perception of rotational movement or spinning, frequently caused by inner ear vestibular disturbances.\n- **BPPV (Benign Paroxysmal Positional Vertigo):** Dislodged calcium carbonate crystals (otoconia) in the semicircular canals. Repositioning maneuvers (such as the Epley maneuver performed by a clinician) offer a 90%+ resolution rate.\n- **Lightheadedness:** Sensation of feeling faint without spinning; most commonly linked to dehydration, anemia, or blood pressure fluctuations.\n- **Seek Urgent Care If:** Accompanied by double vision, facial weakness, difficulty speaking, or loss of limb coordination."
+      ]
+    },
+    {
+      "tag": "med_endo_diabetes_glucose",
+      "patterns": [
+        "normal fasting blood sugar level",
+        "diabetes type 1 vs type 2",
+        "how to lower blood glucose",
+        "signs of high blood sugar hyperglycemia",
+        "prediabetes range and reversal",
+        "insulin resistance symptoms",
+        "blood sugar chart"
+      ],
+      "responses": [
+        "**Blood Glucose Baselines & Diabetes Standards (ADA):**\n\n1. **Fasting Blood Glucose Levels:**\n   - **Normal:** 70 to 99 mg/dL\n   - **Prediabetes:** 100 to 125 mg/dL\n   - **Diabetes:** \u2265 126 mg/dL (confirmed on two separate tests)\n\n2. **Type 1 vs Type 2:**\n   - **Type 1:** Autoimmune destruction of pancreatic beta cells requiring exogenous insulin therapy.\n   - **Type 2:** Peripheral insulin resistance combined with progressive secretory defect; strongly responsive to resistance training, dietary carb moderation, and metformin.\n\n3. **Lifestyle Interventions:** Post-meal 10-minute walks increase GLUT4 transporter activity, clearing circulating glucose independently of insulin."
+      ]
+    },
+    {
+      "tag": "med_endo_hba1c",
+      "patterns": [
+        "what is hba1c test",
+        "normal hba1c range",
+        "how to lower a1c level",
+        "glycated hemoglobin explained",
+        "what does 6.2 a1c mean",
+        "a1c diabetes test results"
+      ],
+      "responses": [
+        "**Hemoglobin A1c (HbA1c) Diagnostic Standards:**\n\n- **Clinical Meaning:** Measures the percentage of hemoglobin proteins coated with sugar, providing an accurate **2-to-3 month rolling average of blood glucose**.\n- **Diagnostic Ranges:**\n  - **Normal:** Below **5.7%**\n  - **Prediabetes:** **5.7% to 6.4%**\n  - **Diabetes:** **6.5% or higher**\n- **Target for Diabetics:** Typically under **7.0%** to prevent microvascular complications (neuropathy, retinopathy, nephropathy).\n- **Effective Strategies:** Resistance training, caloric deficit if overweight, fiber-rich diets, and continuous glucose monitoring."
+      ]
+    },
+    {
+      "tag": "med_endo_hypoglycemia",
+      "patterns": [
+        "low blood sugar symptoms",
+        "hypoglycemia 15 15 rule",
+        "shaking and sweating from low sugar",
+        "blood sugar dropped below 70",
+        "how to treat low blood glucose fast",
+        "hypoglycemia emergency"
+      ],
+      "responses": [
+        "**Acute Hypoglycemia & The 15-15 Rule:**\n\n- **Definition:** Blood glucose falling below **70 mg/dL**.\n- **Classic Symptoms:** Shakiness, diaphoresis (cold sweats), rapid pulse, dizziness, intense hunger, confusion.\n- **The Clinical 15-15 Protocol:**\n  1. Ingest **15 grams of fast-acting simple carbohydrates** (e.g., 4 oz fruit juice, 1/2 can regular soda, 3\u20134 glucose tablets, 1 tablespoon honey).\n  2. Wait **15 minutes** and re-check blood glucose.\n  3. If still below 70 mg/dL, repeat with another 15g of carbs.\n  4. Once normalized, eat a small snack with protein and complex carbs (e.g., peanut butter crackers) to stabilize levels."
+      ]
+    },
+    {
+      "tag": "med_endo_thyroid",
+      "patterns": [
+        "hypothyroidism vs hyperthyroidism",
+        "tsh test results explained",
+        "thyroid symptoms fatigue weight gain",
+        "underactive thyroid symptoms",
+        "normal tsh range",
+        "levothyroxine information"
+      ],
+      "responses": [
+        "**Thyroid Gland Function & TSH Reference Ranges:**\n\n- **Normal TSH Baseline:** Typically **0.4 to 4.0 mIU/L**.\n- **Hypothyroidism (Underactive):** High TSH, low Free T4. Symptoms include unprovoked fatigue, cold intolerance, weight gain, constipation, dry skin, and hair thinning. Managed with synthetic T4 (Levothyroxine).\n- **Hyperthyroidism (Overactive):** Low TSH, high Free T4/T3. Symptoms include resting tachycardia, heat intolerance, unexplained weight loss, tremors, and anxiety.\n- **Diagnostic Steps:** Serum TSH, Free T4, and thyroid antibody panels (anti-TPO) evaluated by an endocrinologist."
+      ]
+    },
+    {
+      "tag": "med_infectious_fever_management",
+      "patterns": [
+        "how to manage fever at home",
+        "fever temperature guidelines",
+        "what temperature is considered a fever",
+        "paracetamol vs ibuprofen for fever",
+        "when is fever dangerous in adults",
+        "how to bring down high body temperature"
+      ],
+      "responses": [
+        "**Clinical Fever Standards & Home Care:**\n\n1. **Fever Thresholds:**\n   - **Normal Body Temp:** 97.7\u00b0F \u2013 99.5\u00b0F (36.5\u00b0C \u2013 37.5\u00b0C)\n   - **Low-Grade Fever:** 99.6\u00b0F \u2013 100.3\u00b0F (37.6\u00b0C \u2013 37.9\u00b0C)\n   - **Clinical Fever:** **\u2265 100.4\u00b0F (38.0\u00b0C)**\n2. **Antipyretic Treatment:**\n   - **Paracetamol (Acetaminophen):** 500\u20131000 mg every 4\u20136 hours (max 3000 mg/day).\n   - **Ibuprofen:** 400 mg every 6\u20138 hours with meals.\n3. **Supportive Measures:** Rest, light clothing, room temperature fluids, lukewarm sponging (never use ice baths, which induce shivering).\n4. **Seek Urgent Care If:** Fever >103\u00b0F (39.4\u00b0C), lasting >3 consecutive days, accompanied by stiff neck, confusion, shortness of breath, or petechial rash."
+      ]
+    },
+    {
+      "tag": "med_infectious_antibiotics",
+      "patterns": [
+        "do i need antibiotics for cold or flu",
+        "antibiotic resistance explained",
+        "why won't doctor give antibiotics for viral infection",
+        "how to take antibiotics correctly",
+        "can antibiotics cure virus"
+      ],
+      "responses": [
+        "**Antibiotic Stewardship & Clinical Truths:**\n\n1. **Bacteria vs Viruses:** Antibiotics destroy bacterial cell walls and metabolic machinery. They have **zero therapeutic effect against viruses** (colds, influenza, viral bronchitis, or COVID-19).\n2. **Antibiotic Resistance:** Taking antibiotics unnecessarily or discontinuing courses early enables surviving bacteria to mutate into drug-resistant superbugs.\n3. **Key Rules:**\n   - Only take antibiotics prescribed specifically for a confirmed bacterial infection.\n   - Complete the full prescribed duration even if you feel 100% recovered."
+      ]
+    },
+    {
+      "tag": "med_infectious_uti",
+      "patterns": [
+        "uti urinary tract infection symptoms",
+        "burning sensation when urinating",
+        "frequent urination and pelvic pain",
+        "home remedies for uti",
+        "how is uti treated",
+        "cloudy urine and burning"
+      ],
+      "responses": [
+        "**Urinary Tract Infection (UTI) Clinical Overview:**\n\n- **Hallmark Symptoms:** Dysuria (pain/burning during urination), urinary frequency, urgency, cloudy or strong-smelling urine, and suprapubic pelvic discomfort.\n- **Treatment:** Bacterial UTIs (most commonly *E. coli*) require targeted prescription antibiotics determined by a clean-catch urinalysis and urine culture.\n- **Supportive Care:** Abundant water intake flushes the urinary tract. Avoid caffeine and alcohol.\n- **Urgent Signs (Kidney Involvement / Pyelonephritis):** High fever, flank/back pain, nausea, and shaking chills require immediate urgent physician evaluation."
+      ]
+    },
+    {
+      "tag": "med_pharma_pain_relievers",
+      "patterns": [
+        "paracetamol vs ibuprofen difference",
+        "tylenol vs advil for pain",
+        "maximum daily dose of paracetamol",
+        "is ibuprofen bad for stomach",
+        "which painkiller is best for headache",
+        "nsaids side effects"
+      ],
+      "responses": [
+        "**Comparing Paracetamol (Acetaminophen) vs Ibuprofen (NSAID):**\n\n1. **Paracetamol (Acetaminophen / Tylenol):**\n   - **Mechanism:** Central analgesic and antipyretic. Excellent for headaches, general aches, and fever.\n   - **Key Advantage:** Gentle on the stomach; safe in hypertension.\n   - **Caution:** Metabolized in liver. Strictly avoid exceeding **3,000\u20134,000 mg/day**; do not mix with alcohol.\n\n2. **Ibuprofen (Advil / Motrin / NSAID):**\n   - **Mechanism:** Peripheral anti-inflammatory and analgesic. Superior for muscle strains, joint arthritis, dental pain, and menstrual cramps.\n   - **Caution:** Inhibit protective stomach prostaglandins. Always take with food; avoid in active ulcers, kidney disease, or uncontrolled high BP."
+      ]
+    },
+    {
+      "tag": "med_pharma_allergies_antihistamines",
+      "patterns": [
+        "best antihistamine for allergies",
+        "cetirizine vs loratadine vs fexofenadine",
+        "allergic rhinitis sneezing and itchy eyes",
+        "non drowsy allergy medicine",
+        "how to treat seasonal pollen allergies"
+      ],
+      "responses": [
+        "**Allergic Rhinitis & Antihistamine Comparison:**\n\n- **Mechanism:** Blocks H1 histamine receptors triggered by allergens (pollen, dust mites, pet dander).\n- **Second-Generation (Non-Drowsy):**\n  - **Cetirizine (Zyrtec):** Rapid onset (1 hour); highly effective, minimal sedation.\n  - **Loratadine (Claritin):** Zero sedation; gentle, once-daily 24-hour coverage.\n  - **Fexofenadine (Allegra):** Fastest non-drowsy relief; does not cross the blood-brain barrier.\n- **First-Generation (e.g. Diphenhydramine):** Strong sedation; best reserved for acute hives or nocturnal allergic distress."
+      ]
+    },
+    {
+      "tag": "med_firstaid_burns",
+      "patterns": [
+        "first aid for burns",
+        "how to treat thermal burn",
+        "should i put ice on a burn",
+        "blister from burn first aid",
+        "minor burn home care",
+        "burn relief"
+      ],
+      "responses": [
+        "**First Aid Protocol for Minor Thermal Burns:**\n\n1. **Immediate Cooling:** Hold the burn under **cool, gently running water for 10 to 20 minutes**. This stops heat penetration into deeper dermal layers.\n2. **DO NOT:**\n   - Do NOT apply ice or ice water (causes tissue ischemia and frostbite damage).\n   - Do NOT apply butter, toothpaste, or oils (traps heat and breeds bacteria).\n   - Do NOT pop or puncture blisters (the blister roof acts as a sterile biological barrier).\n3. **Dressing:** Apply pure aloe vera gel or sterile petroleum gauze and cover loosely with a sterile bandage.\n4. **Seek Hospital Care If:** Burn covers a large area, involves face, hands, groin, or major joints, or appears charred/white (3rd degree)."
+      ]
+    },
+    {
+      "tag": "med_firstaid_cuts_bleeding",
+      "patterns": [
+        "how to stop bleeding from cut",
+        "first aid for deep wound",
+        "when does a cut need stitches",
+        "cleaning a bleeding wound",
+        "tetanus shot after cut"
+      ],
+      "responses": [
+        "**Wound Hemostasis & First Aid for Cuts:**\n\n1. **Direct Pressure:** Apply firm, continuous pressure with a sterile gauze or clean cloth for **5 to 10 full minutes without lifting to check**.\n2. **Elevation:** Elevate the injured extremity above heart level.\n3. **Cleansing:** Gently flush the wound under clean running tap water to remove debris. Apply antibiotic ointment or petroleum jelly.\n4. **When Stitches are Mandatory:** Gaping wound edges, visible yellow subcutaneous fat or muscle, or bleeding that does not stop after 10 minutes of direct pressure (must be sutured within 6\u20138 hours).\n5. **Tetanus Booster:** Needed if the wound is dirty/puncture-type and your last tetanus shot was >5 years ago."
+      ]
+    },
+    {
+      "tag": "med_firstaid_sprain_rice",
+      "patterns": [
+        "how to treat sprained ankle",
+        "rice protocol for sprain",
+        "twisted ankle swelling and ice",
+        "sprain vs fracture symptoms",
+        "how long to ice a sprained ligament"
+      ],
+      "responses": [
+        "**Acute Ligament Sprain Management (The R.I.C.E Protocol):**\n\n- **R (Rest):** Immobilize and avoid weight-bearing on the joint.\n- **I (Ice):** Apply cold packs wrapped in a towel for **15\u201320 minutes every 2\u20133 hours** during the first 48 hours to minimize inflammatory edema.\n- **C (Compression):** Wrap an elastic compression bandage (ACE wrap) snugly from distal to proximal (avoid cutting off circulation).\n- **E (Elevation):** Prop the extremity above heart level.\n- **Ottawa Ankle Rules (Suspected Fracture):** If unable to bear weight for 4 steps or tender over the posterior lateral/medial malleolus, obtain an X-ray."
+      ]
+    },
+    {
+      "tag": "med_firstaid_choking_heimlich",
+      "patterns": [
+        "first aid for choking",
+        "how to perform heimlich maneuver",
+        "someone is choking what to do",
+        "choking adult first aid steps",
+        "abdominal thrusts instructions"
+      ],
+      "responses": [
+        "**Emergency Airway Clearing for Conscious Choking Adults:**\n\n1. **Verify:** Ask *'Are you choking?'* If the person cannot speak, cough, or breathe and clutches their throat (universal choking sign), act immediately.\n2. **Stand Behind:** Wrap your arms around their waist.\n3. **Fist Placement:** Make a fist with one hand. Place the thumb side slightly above the person's navel and well below the xiphoid breastbone.\n4. **Thrusts:** Grasp your fist with your other hand. Deliver quick, forceful upward and inward abdominal thrusts.\n5. **Continue Until:** The foreign object is expelled or the person becomes unresponsive (if unresponsive, lower to floor and begin CPR with 911 dispatched)."
+      ]
+    },
+    {
+      "tag": "med_firstaid_anaphylaxis",
+      "patterns": [
+        "anaphylaxis severe allergic reaction",
+        "how to use epipen auto injector",
+        "throat swelling from food allergy",
+        "signs of anaphylactic shock",
+        "emergency allergy injection"
+      ],
+      "responses": [
+        "\u26a0\ufe0f **CRITICAL MEDICAL EMERGENCY: ANAPHYLAXIS:**\n\n- **Signs:** Rapid swelling of lips, tongue, or throat, wheezing/stridor, widespread hives, dizziness, or precipitous drop in blood pressure.\n- **Immediate Actions:**\n  1. **Administer Epinephrine (EpiPen):** Inject firmly into the outer mid-thigh at a 90-degree angle and hold for 3 seconds.\n  2. **Call 911 / 112 Immediately:** Inform emergency dispatch that epinephrine was administered.\n  3. **Positioning:** Lie the person flat with legs elevated (unless breathing is easier sitting up).\n  4. A second dose can be given after 5\u201315 minutes if symptoms persist."
+      ]
+    },
+    {
+      "tag": "med_ortho_back_pain",
+      "patterns": [
+        "how to relieve lower back pain",
+        "lumbar strain treatment",
+        "exercises for bad back",
+        "bed rest for back pain good or bad",
+        "sciatica nerve pain shooting down leg",
+        "pinched nerve lower back"
+      ],
+      "responses": [
+        "**Evidence-Based Management of Acute Lower Back Pain:**\n\n1. **Stay Active:** Prolonged bed rest (>48h) weakens core stabilizers and delays recovery. Light, frequent walking maintains disc hydration and reduces stiffness.\n2. **Thermal Therapy:** Apply ice packs for the first 48 hours for acute inflammation; transition to moist heat thereafter to relax muscle spasms.\n3. **Gentle Decompression:** The 'Cat-Cow' yoga pose and pelvic tilts gently mobilize lumbar facets.\n4. **Red Flags (Cauda Equina Syndrome):** Sudden loss of bowel or bladder control, progressive lower limb motor weakness, or saddle anesthesia (numbness in groin/buttocks) is a surgical emergency."
+      ]
+    },
+    {
+      "tag": "med_ortho_joint_arthritis",
+      "patterns": [
+        "osteoarthritis vs rheumatoid arthritis",
+        "joint pain in knees and fingers",
+        "supplements for joint cartilage",
+        "how to manage arthritis stiffness",
+        "exercise for knee arthritis"
+      ],
+      "responses": [
+        "**Clinical Overview of Joint Pain & Arthritis:**\n\n- **Osteoarthritis (OA):** Mechanical wear-and-tear degradation of articular cartilage; pain typically worsens with movement and evening fatigue.\n- **Rheumatoid Arthritis (RA):** Autoimmune systemic inflammatory synovitis; characterized by morning joint stiffness lasting >1 hour, bilateral symmetry, and elevated inflammatory markers (CRP, ESR).\n- **Preservation Strategies:**\n  - Low-impact aerobic conditioning (swimming, cycling) strengthens supporting quadriceps/hamstrings without joint concussion.\n  - Glucosamine, chondroitin, and Omega-3 fatty acids assist in cartilage metabolic turnover.\n  - Weight management: Every 1 kg of body weight reduction alleviates 4 kg of pressure across the knee joint."
+      ]
+    },
+    {
+      "tag": "med_derm_rashes_eczema",
+      "patterns": [
+        "how to treat eczema skin rash",
+        "itchy red skin patches",
+        "atopic dermatitis moisturizers",
+        "contact dermatitis treatment",
+        "hydrocortisone cream for rash",
+        "soothing irritated skin"
+      ],
+      "responses": [
+        "**Dermatological Care for Eczema & Irritated Skin:**\n\n1. **Skin Barrier Repair:** Apply thick, ceramide-rich ointments or creams (e.g. petroleum jelly, barrier balms) within 3 minutes of bathing to seal in epidermal moisture.\n2. **Inflammation Relief:** Short courses of OTC 1% Hydrocortisone cream reduce itching and erythema.\n3. **Trigger Avoidance:** Avoid hot showers (use lukewarm water), harsh sulfates/fragrances, and synthetic scratchy fabrics.\n4. **When to Seek a Doctor:** Yellow crusting, pus oozing, intense pain, or fever indicates secondary bacterial infection (impetiginization)."
+      ]
+    },
+    {
+      "tag": "med_mental_anxiety_panic",
+      "patterns": [
+        "how to stop a panic attack",
+        "panic attack vs heart attack difference",
+        "anxiety symptoms heart pounding breathing fast",
+        "grounding techniques for anxiety",
+        "5 4 3 2 1 method for panic",
+        "hyperventilating and anxiety"
+      ],
+      "responses": [
+        "**Differentiating Panic Attacks vs Acute Cardiac Events:**\n\n1. **Comparison:**\n   - **Panic Attack:** Rapid escalation, sharp localized chest sensation, hyperventilation, tingling fingers/toes (paresthesia from respiratory alkalosis); typically peaks within 10 minutes and subsides.\n   - **Heart Attack:** Heavy, dull, crushing central pressure radiating into jaw/left arm, exertional onset, diaphoresis, unbroken duration.\n2. **Immediate Grounding Techniques:**\n   - **The 5-4-3-2-1 Sensory Method:** Name 5 things you can see, 4 you can touch, 3 you can hear, 2 you can smell, and 1 you can taste.\n   - **Extended Exhalations:** Breathe in for 4 seconds, exhale slowly for 7 seconds to stimulate vagal parasympathetic slowing of heart rate."
+      ]
+    },
+    {
+      "tag": "med_preventive_lab_blood_test",
+      "patterns": [
+        "what blood tests should i get annually",
+        "complete blood count cbc explained",
+        "liver function test alt ast",
+        "kidney function test creatinine egfr",
+        "understanding routine blood work",
+        "annual wellness checkup labs"
+      ],
+      "responses": [
+        "**Core Diagnostic Biomarkers for Routine Health Screening:**\n\n1. **Complete Blood Count (CBC):** Evaluates red blood cells (anemia), white blood cells (infection/immune status), and platelets (hemostasis).\n2. **Comprehensive Metabolic Panel (CMP):**\n   - **Renal:** Serum Creatinine and eGFR (>90 mL/min indicates healthy filtration).\n   - **Hepatic:** ALT and AST liver enzymes.\n   - **Electrolytes:** Sodium, Potassium, Calcium.\n3. **Cardiovascular & Glycemic:** Lipid Profile (LDL/HDL/Triglycerides) and Fasting Glucose / HbA1c.\n4. **Preventive Schedule:** Recommended annually for adults to establish physiological baselines."
+      ]
+    },
+    {
+      "tag": "vitals_heart_rate",
+      "patterns": [
+        "how is my heart rate",
+        "what is my resting heart rate",
+        "is my pulse normal",
+        "current bpm",
+        "check my heart rate",
+        "heart pulse status",
+        "is my heart healthy",
+        "my bpm today",
+        "heart rate reading",
+        "pulse check"
+      ],
+      "responses": [
+        "Your latest recorded resting heart rate is **{heart_rate} BPM**, which is within the standard healthy clinical range (60\u2013100 BPM). Your cardiovascular trends indicate steady autonomic nervous system regulation.",
+        "Cardiovascular Status: Your heart rate is holding at **{heart_rate} BPM**. Blood pressure sits at **{blood_pressure}** with SpO2 at **{spo2}**."
+      ]
+    },
+    {
+      "tag": "vitals_sleep",
+      "patterns": [
+        "how did I sleep",
+        "check my sleep",
+        "sleep quality score",
+        "last night sleep",
+        "did I get enough sleep",
+        "my sleep hours",
+        "am I sleeping well",
+        "sleep duration and score",
+        "sleep recovery analysis"
+      ],
+      "responses": [
+        "Your last recorded sleep session was **{last_sleep_hours}** with a quality score of **{last_sleep_score}/100**. For your goal ({primary_goal}), adequate deep and REM sleep is crucial for cellular repair and mental clarity."
+      ]
+    },
+    {
+      "tag": "vitals_hydration",
+      "patterns": [
+        "how much water did I drink",
+        "hydration status",
+        "water intake today",
+        "did I drink enough water",
+        "check my hydration",
+        "daily water goal",
+        "water tracker",
+        "my water log"
+      ],
+      "responses": [
+        "Hydration Status: You have logged **{today_water_ml} mL** today toward your **{water_target_ml} mL** daily target ({water_percent}%). Regular fluid intake preserves plasma volume, joint lubrication, and cognitive focus."
+      ]
+    },
+    {
+      "tag": "vitals_steps_activity",
+      "patterns": [
+        "how many steps did I take",
+        "today's activity",
+        "steps walked today",
+        "check my steps",
+        "am I active today",
+        "calories burned today",
+        "daily step progress"
+      ],
+      "responses": [
+        "Today's Activity Progress: You have logged **{today_steps} steps** and burned approximately **{today_calories} kcal**. Meeting your daily movement targets boosts insulin sensitivity and cardiovascular resilience."
+      ]
+    },
+    {
+      "tag": "vitals_snapshot",
+      "patterns": [
+        "give me my health summary",
+        "how are my vitals today",
+        "full health snapshot",
+        "overall wellness status",
+        "check all my stats",
+        "overview of my health",
+        "daily vitals summary"
+      ],
+      "responses": [
+        "Here is your real-time VitalSync health overview for **{name}**:\n- **Resting Heart Rate:** {heart_rate} BPM (BP: {blood_pressure}, SpO2: {spo2})\n- **Activity:** {today_steps} steps ({today_calories} kcal burned)\n- **Sleep:** {last_sleep_hours} (Score: {last_sleep_score}/100)\n- **Hydration:** {today_water_ml} / {water_target_ml} mL ({water_percent}%)\n- **Primary Goal:** {primary_goal}\n\nYour physiological markers indicate a balanced autonomic baseline."
+      ]
+    },
+    {
+      "tag": "clinical_emergency_chest_pain",
+      "patterns": [
+        "I have severe chest pain",
+        "chest pressure and radiating arm pain",
+        "crushing feeling in my chest",
+        "heart attack symptoms",
+        "pain in chest and jaw",
+        "chest tightness and difficulty breathing",
+        "sudden heavy squeezing in chest"
+      ],
+      "responses": [
+        "\u26a0\ufe0f **CRITICAL MEDICAL EMERGENCY:** Crushing or heavy chest pressure, especially radiating to your jaw, neck, back, or left arm, along with shortness of breath, can be signs of an acute cardiac event (myocardial infarction).\n\n**Action Required Immediately:**\n1. Stop all physical exertion and sit in a comfortable upright or semi-reclined position.\n2. Call emergency medical services (**911**, **112**, or your local emergency number) immediately.\n3. Do not drive yourself to the emergency department. Inform someone nearby."
+      ]
+    },
+    {
+      "tag": "clinical_emergency_stroke",
+      "patterns": [
+        "one side of my face is drooping",
+        "sudden numbness in arm and slurred speech",
+        "stroke warning signs",
+        "cannot move my arm and slurring words",
+        "facial droop and arm weakness",
+        "sudden loss of balance and vision"
+      ],
+      "responses": [
+        "\u26a0\ufe0f **CRITICAL STROKE ALERT (FAST PROTOCOL):** Facial drooping, unilateral arm weakness, or slurred/incoherent speech are primary signs of an acute stroke (cerebrovascular accident).\n\n**Act FAST:**\n- **F (Face):** Is one side of the face drooping when smiling?\n- **A (Arms):** Can the person raise both arms evenly?\n- **S (Speech):** Is speech slurred or strange?\n- **T (Time):** Call emergency services (**911** / **112**) immediately! Every minute saves brain tissue."
+      ]
+    },
+    {
+      "tag": "nutrition_protein",
+      "patterns": [
+        "how much protein do I need",
+        "top protein sources",
+        "best food for muscle recovery",
+        "protein intake for hypertrophy",
+        "lean protein recommendations",
+        "protein per kg bodyweight"
+      ],
+      "responses": [
+        "For active individuals and muscle hypertrophy, scientific consensus recommends **1.6 to 2.2 grams of protein per kilogram of body weight** daily.\n\n**Top Bioavailable Protein Sources:**\n1. **Eggs & Egg Whites:** Gold standard biological value.\n2. **Chicken Breast & Turkey:** ~31g protein per 100g, very low fat.\n3. **Greek Yogurt / Cottage Cheese:** Rich in slow-digesting micellar casein.\n4. **Fish (Salmon, Tuna):** Delivers essential Omega-3 fatty acids.\n5. **Plant-Based (Tofu, Tempeh, Lentils, Edamame):** Complete plant proteins when combined with whole grains."
+      ]
+    },
+    {
+      "tag": "workout_hypertrophy",
+      "patterns": [
+        "how to build muscle",
+        "hypertrophy training principles",
+        "best rep range for muscle growth",
+        "progressive overload explained",
+        "workout split advice"
+      ],
+      "responses": [
+        "**Core Principles of Muscle Hypertrophy:**\n\n1. **Mechanical Tension:** The primary driver of muscle hypertrophy. Lift through a full active range of motion with controlled eccentric tempos (2\u20133 seconds).\n2. **Progressive Overload:** Systematically add weight, reps, or improve execution quality over time.\n3. **Volume:** Aim for 10\u201320 hard sets per muscle group per week.\n4. **Proximity to Failure:** Train within 1 to 3 Reps in Reserve (RIR) on compound lifts."
+      ]
+    },
+    {
+      "tag": "greetings",
+      "patterns": [
+        "hello",
+        "hi",
+        "hey",
+        "good morning",
+        "good afternoon",
+        "good evening",
+        "greetings",
+        "sup",
+        "yo"
+      ],
+      "responses": [
+        "Hello {name}! I am your VitalSync Core AI medical & wellness assistant. How can I help you today with health questions, symptoms, vitals, or workout recovery?",
+        "Hey there! Ready to assist you with medical questions, vitals analytics, or daily recovery. What's on your mind?"
+      ]
+    },
+    {
+      "tag": "identity",
+      "patterns": [
+        "who are you",
+        "what is your name",
+        "what model are you",
+        "what can you do",
+        "who created you",
+        "tell me about yourself"
+      ],
+      "responses": [
+        "I am **VitalSync Core AI**, an in-house clinical intelligence and wellness engine trained specifically on verified medical literature and live health telemetry. I provide instant, evidence-based medical answers without external third-party dependencies."
+      ]
+    },
+    {
+      "tag": "general_humor",
+      "patterns": [
+        "tell me a joke",
+        "say something funny",
+        "make me laugh",
+        "give me a medical joke",
+        "health joke"
+      ],
+      "responses": [
+        "Why don't skeletons fight each other? They don't have the guts! \ud83e\ude7b",
+        "Why did the doctor carry a red pen? In case they needed to draw blood! \ud83d\udc89",
+        "Why do programmers prefer dark mode? Because light attracts bugs! \ud83d\udcbb"
+      ]
+    }
+  ]
+}
