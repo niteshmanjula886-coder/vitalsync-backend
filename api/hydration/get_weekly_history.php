@@ -224,7 +224,7 @@ try {
         'consistency_rating' => ($totalDaysLogged8Weeks >= 28) ? 'High' : (($totalDaysLogged8Weeks >= 14) ? 'Moderate' : 'Developing')
     ];
 
-    // 5. Active AI Hydration Insight powered by Ollama (qwen2.5:3b / qwen3:4b with fallback)
+    // 5. Active Hydration Clinical Insight
     $currAvg = $currentWeek ? $currentWeek['avg_daily_ml'] : $summary['overall_avg_daily_ml'];
     $completion = $currentWeek ? $currentWeek['completion_rate_percent'] : 0;
     $trendPctAbs = abs($summary['trend_percentage']);
@@ -262,7 +262,7 @@ try {
         'summary' => $fallbackSummary,
         'actionable_advice' => $fallbackAdvice,
         'hydration_score' => $hydrationScore,
-        'model_used' => 'VitalSync-Core-AI-v1'
+        'model_used' => 'vitalsync:clinical-engine'
     ];
 
     // 6. Return standard JSON response

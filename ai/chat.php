@@ -2,7 +2,7 @@
 
 set_time_limit(180);
 require_once __DIR__ . "/../config/auth_middleware.php";
-require_once __DIR__ . "/vitalsync_ai_service.php";
+require_once __DIR__ . "/ai_service.php";
 
 $userId = resolveUserIdOrDie($conn, true);
 $method = $_SERVER["REQUEST_METHOD"];
@@ -25,7 +25,7 @@ if ($method === "GET") {
             "sender" => $r["sender"],
             "text" => $r["message_text"],
             "timeText" => $r["time_text"] ?: date("h:i A", strtotime($r["created_at"])),
-            "modelUsed" => $r["model_used"] ?? NATIVE_MODEL_NAME
+            "modelUsed" => $r["model_used"] ?? "vitalsync:ai-engine"
         ];
     }
     $stmt->close();
@@ -34,13 +34,12 @@ if ($method === "GET") {
     if (empty($messages)) {
         $ctx = fetchUserHealthContext($conn, $userId);
         $name = !empty($ctx["name"]) && $ctx["name"] !== "User" ? " " . $ctx["name"] : "";
-        $welcomeText = "Hello{$name}! I am your VitalSync Core AI assistant. I'm trained natively on clinical telemetry, sleep analytics, workouts, nutrition, and general knowledge. How can I help you today?";
+        $welcomeText = "Hello{$name}! I am your VitalSync AI assistant. I'm here for anything—from daily health, sleep, and workouts, to general knowledge, movies, tech, and everyday curiosity. How can I help you today?";
         $welcomeTime = date("h:i A");
 
         // Insert initial message
-        $wStmt = $conn->prepare("INSERT INTO ai_chat_messages (user_id, sender, message_text, time_text, model_used) VALUES (?, 'AI', ?, ?, ?)");
-        $modelName = NATIVE_MODEL_NAME;
-        $wStmt->bind_param("isss", $userId, $welcomeText, $welcomeTime, $modelName);
+        $wStmt = $conn->prepare("INSERT INTO ai_chat_messages (user_id, sender, message_text, time_text, model_used) VALUES (?, 'AI', ?, ?, 'vitalsync:ai-engine')");
+        $wStmt->bind_param("iss", $userId, $welcomeText, $welcomeTime);
         $wStmt->execute();
         $welcomeId = $wStmt->insert_id;
         $wStmt->close();
@@ -50,7 +49,7 @@ if ($method === "GET") {
             "sender" => "AI",
             "text" => $welcomeText,
             "timeText" => $welcomeTime,
-            "modelUsed" => NATIVE_MODEL_NAME
+            "modelUsed" => "vitalsync:ai-engine"
         ];
     }
 
@@ -75,105 +74,107 @@ if ($method === "POST") {
     }
 
     $timeText = date("h:i A");
-    $userMsgId = time();
-    $aiMsgId = time() + 1;
-    $ragArticles = [];
-    $healthContext = [];
-    $aiReply = "";
-    $modelUsed = NATIVE_MODEL_NAME;
-    $tokensUsed = 0;
-    $inferenceResult = [];
 
-    try {
-        // 1. Save user message
-        if ($conn && $conn instanceof \mysqli) {
-            $uStmt = $conn->prepare("INSERT INTO ai_chat_messages (user_id, sender, message_text, time_text) VALUES (?, 'USER', ?, ?)");
-            if ($uStmt) {
-                $uStmt->bind_param("iss", $userId, $userText, $timeText);
-                if ($uStmt->execute()) {
-                    $userMsgId = $uStmt->insert_id ?: $userMsgId;
-                }
-                $uStmt->close();
-            }
+    // 1. Save user message
+    $uStmt = $conn->prepare("INSERT INTO ai_chat_messages (user_id, sender, message_text, time_text) VALUES (?, 'USER', ?, ?)");
+    $uStmt->bind_param("iss", $userId, $userText, $timeText);
+    $uStmt->execute();
+    $userMsgId = $uStmt->insert_id;
+    $uStmt->close();
+
+    // 2. Perform RAG Knowledge Base Retrieval
+    $ragArticles = searchKnowledgeBase($conn, $userText, 1);
+
+    // 3. Detect intent and fetch health context
+    $isPersonalHealth = isUserPersonalHealthQuery($userText);
+    $healthContext = fetchUserHealthContext($conn, $userId);
+    $historyMessages = loadConversationHistory($conn, $userId, 4);
+
+    // 4. Build general-purpose, RAG-grounded system prompt
+    $systemPrompt = buildGeneralAiSystemPrompt($healthContext, $ragArticles, $isPersonalHealth);
+
+    $aiInput = [];
+    foreach ($historyMessages as $h) {
+        $aiInput[] = [
+            "role" => $h["role"],
+            "content" => $h["content"]
+        ];
+    }
+    // Include current prompt
+    $aiInput[] = [
+        "role" => "user",
+        "content" => $userText
+    ];
+
+    // 5. Streaming Check (SSE)
+    $isStream = (isset($_GET["stream"]) && ($_GET["stream"] === "1" || $_GET["stream"] === "true")) ||
+                (isset($data["stream"]) && ($data["stream"] === true || $data["stream"] === "true" || $data["stream"] === 1));
+
+    if ($isStream) {
+        header("Content-Type: text/event-stream; charset=UTF-8");
+        header("Cache-Control: no-cache");
+        header("Connection: keep-alive");
+        header("X-Accel-Buffering: no");
+
+        while (ob_get_level()) {
+            ob_end_clean();
         }
 
-        // 2. Perform RAG Knowledge Base Retrieval
-        $ragArticles = searchKnowledgeBase($conn, $userText, 1);
+        $accumulated = "";
+        $streamWorked = streamAiChat($aiInput, $systemPrompt, function($chunk, $done) use (&$accumulated) {
+            $accumulated .= $chunk;
+            echo "data: " . json_encode(["chunk" => $chunk, "done" => $done]) . "\n\n";
+            @flush();
+        });
 
-        // 3. Fetch authenticated user health context
-        $healthContext = fetchUserHealthContext($conn, $userId);
-
-        // 4. Run VitalSync Native Neural Inference
-        $inferenceResult = runVitalSyncNeuralInference($userText, $healthContext, $ragArticles);
-        $aiReply = $inferenceResult["text"] ?? "";
-        $modelUsed = $inferenceResult["model"] ?? NATIVE_MODEL_NAME;
-        $tokensUsed = $inferenceResult["eval_count"] ?? str_word_count($aiReply);
-
-        if (empty($aiReply)) {
-            $aiReply = "I have reviewed your message. Based on your active telemetry, your health indicators are stable. What specific question can I answer for you?";
-        }
-
-        // 5. Streaming Check (Server-Sent Events)
-        $isStream = (isset($_GET["stream"]) && ($_GET["stream"] === "1" || $_GET["stream"] === "true")) ||
-                    (isset($data["stream"]) && ($data["stream"] === true || $data["stream"] === "true" || $data["stream"] === 1));
-
-        if ($isStream) {
-            header("Content-Type: text/event-stream; charset=UTF-8");
-            header("Cache-Control: no-cache");
-            header("Connection: keep-alive");
-            header("X-Accel-Buffering: no");
-
-            while (ob_get_level()) {
-                ob_end_clean();
-            }
-
-            $words = explode(" ", $aiReply);
-            $wordCount = count($words);
+        if (!$streamWorked || empty($accumulated)) {
+            $fallback = generateIntelligentFallbackReply($userText, $healthContext, $ragArticles);
+            $words = explode(" ", $fallback);
             foreach ($words as $idx => $w) {
-                $isLast = ($idx === $wordCount - 1);
-                $chunk = $w . ($isLast ? "" : " ");
-                echo "data: " . json_encode(["chunk" => $chunk, "done" => $isLast]) . "\n\n";
+                $isLast = ($idx === count($words) - 1);
+                echo "data: " . json_encode(["chunk" => $w . " ", "done" => $isLast]) . "\n\n";
                 @flush();
-                usleep(8000);
+                usleep(12000);
             }
-
-            if ($conn && $conn instanceof \mysqli) {
-                $aStmt = $conn->prepare("INSERT INTO ai_chat_messages (user_id, sender, message_text, time_text, model_used, tokens_used) VALUES (?, 'AI', ?, ?, ?, ?)");
-                if ($aStmt) {
-                    $aStmt->bind_param("isssi", $userId, $aiReply, $timeText, $modelUsed, $tokensUsed);
-                    $aStmt->execute();
-                    $aStmt->close();
-                }
-                $conn->close();
-            }
-            exit;
+            $accumulated = $fallback;
         }
 
-        // 6. Save AI Response (Standard JSON mode)
-        if ($conn && $conn instanceof \mysqli) {
-            $aStmt = $conn->prepare(
-                "INSERT INTO ai_chat_messages (user_id, sender, message_text, time_text, model_used, tokens_used) 
-                 VALUES (?, 'AI', ?, ?, ?, ?)"
-            );
-            if ($aStmt) {
-                $aStmt->bind_param("isssi", $userId, $aiReply, $timeText, $modelUsed, $tokensUsed);
-                if ($aStmt->execute()) {
-                    $aiMsgId = $aStmt->insert_id ?: $aiMsgId;
-                }
-                $aStmt->close();
-            }
-            $conn->close();
-        }
-
-    } catch (\Throwable $e) {
-        error_log("VitalSync AI chat exception: " . $e->getMessage());
-        if (empty($aiReply)) {
-            $aiReply = "I have analyzed your inquiry. Your recorded vitals are stable. Feel free to ask about your heart rate, sleep metrics, workout recovery, or medical guidelines.";
-        }
+        $aStmt = $conn->prepare("INSERT INTO ai_chat_messages (user_id, sender, message_text, time_text, model_used) VALUES (?, 'AI', ?, ?, 'vitalsync:ai-engine')");
+        $aStmt->bind_param("iss", $userId, $accumulated, $timeText);
+        $aStmt->execute();
+        $aStmt->close();
+        $conn->close();
+        exit;
     }
 
+    // 5. Inference: Query AI service or perform RAG-enhanced intelligent fallback
+    $aiResult = callAiChat($aiInput, $systemPrompt);
+
+    if ($aiResult !== null && !empty($aiResult["text"])) {
+        $aiReply = $aiResult["text"];
+        $modelUsed = $aiResult["model"];
+        $tokensUsed = $aiResult["eval_count"] ?? 0;
+    } else {
+        // Multi-domain RAG-enhanced intelligent reasoning
+        $aiReply = generateIntelligentFallbackReply($userText, $healthContext, $ragArticles);
+        $modelUsed = $isPersonalHealth ? "vitals:personal-sync" : (!empty($ragArticles) ? "rag:verified-kb" : "vitalsync:ai-engine");
+        $tokensUsed = 0;
+    }
+
+    // 6. Save AI Response
+    $aStmt = $conn->prepare(
+        "INSERT INTO ai_chat_messages (user_id, sender, message_text, time_text, model_used, tokens_used) 
+         VALUES (?, 'AI', ?, ?, ?, ?)"
+    );
+    $aStmt->bind_param("isssi", $userId, $aiReply, $timeText, $modelUsed, $tokensUsed);
+    $aStmt->execute();
+    $aiMsgId = $aStmt->insert_id;
+    $aStmt->close();
+
+    $conn->close();
+
     $ragSourcesSummary = array_map(function($a) {
-        return ["topic" => $a["topic"] ?? "", "category" => $a["category"] ?? ""];
+        return ["topic" => $a["topic"], "category" => $a["category"]];
     }, $ragArticles);
 
     respondJson(200, [
@@ -191,8 +192,6 @@ if ($method === "POST") {
             "text" => $aiReply,
             "timeText" => $timeText,
             "model_used" => $modelUsed,
-            "intent" => $inferenceResult["intent"] ?? "general",
-            "confidence" => $inferenceResult["confidence"] ?? 1.0,
             "rag_sources" => $ragSourcesSummary
         ]
     ]);
