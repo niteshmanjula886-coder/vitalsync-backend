@@ -1,33 +1,210 @@
 <?php
 
 /**
- * VitalSync AI - Modular, General-Purpose & RAG-Enhanced AI Service
- * Decoupled from Ollama to support pluggable AI providers (Gemini, OpenAI, Groq, local inference, etc.)
- * augmented with MySQL Full-Text RAG and multi-domain intelligent reasoning.
+ * VitalSync AI - Local Ollama AI Engine (qwen2.5:1.5b)
+ * 
+ * 1. TARGET MODEL:
+ *    - Model: "qwen2.5:1.5b"
+ *    - Target Endpoint: http://127.0.0.1:11434/api/chat
+ * 
+ * 2. SYSTEM PROMPT REASONING & GROUNDING:
+ *    - NLP Tolerance: Infer intent smoothly despite typos or broken grammar without pointing them out
+ *    - Hardware Disconnection Check: Alert if metric is missing or "NOT_RECORDED":
+ *      "Your [metric] has not been recorded yet. Please connect your compatible smartwatch or health tracker via Settings > Connected Devices to enable live monitoring."
+ *    - BMI & Weight Guidance: If BMI between 25.0 and 29.9, clearly state overweight category, no false flattery, suggest 300–400 kcal deficit, daily brisk walking, adequate protein
+ *    - Activity Analysis: Compare actual vs target steps, highlight deficit with realistic pacing tips
+ *    - Diet Plans: Structured meal breakdown (Breakfast, Lunch, Snack, Dinner)
+ *    - Formatting: Clean markdown bullets and bold all metrics and targets (e.g., **26.1 BMI**, **0 / 10,000 steps**)
+ * 
+ * 3. TELEMETRY INJECTION:
+ *    - Passes live vitals from DB: Height, Weight, BMI, Heart Rate, BP, SpO2, Steps/Target, Hydration/Target
+ *    - If sensor reading is missing or 0, marks as "NOT_RECORDED"
+ * 
+ * 4. OLLAMA CHAT API INTEGRATION:
+ *    - Structured JSON payload with messages (system prompt, conversation history, user prompt), stream=false, temperature=0.3
  */
 
-// Active AI Provider Configuration: 'fallback' | 'gemini' | 'openai' | 'custom'
-define("AI_PROVIDER", getenv("AI_PROVIDER") ?: "fallback");
+define("OLLAMA_BASE_URL", "http://127.0.0.1:11434");
+define("OLLAMA_MODEL", "qwen2.5:1.5b");
+define("OLLAMA_TIMEOUT_SECONDS", 120);
 
 /**
- * Pluggable AI Chat Dispatcher.
- * Dispatches to configured AI provider or returns null to trigger intelligent local reasoning.
- *
- * @param array $messages Array of ['role' => 'user'|'assistant'|'system', 'content' => '...']
- * @param string $systemPrompt Optional system prompt prepended
- * @return array|null Returns ['text' => string, 'model' => string, 'eval_count' => int] or null
+ * Checks if local Ollama daemon is reachable on port 11434.
  */
-function callAiChat(array $messages, $systemPrompt = "") {
-    // When a new provider (e.g., Gemini / Groq / OpenAI) is configured, it plugs directly in here.
-    return null;
+function isOllamaReachable() {
+    $ch = curl_init(OLLAMA_BASE_URL . "/");
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 2,
+        CURLOPT_CONNECTTIMEOUT => 2,
+        CURLOPT_NOBODY => true
+    ]);
+    $res = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    return ($httpCode >= 200 && $httpCode < 400);
 }
 
 /**
- * Streams AI chat chunks in real-time.
+ * Calls local Ollama /api/chat with qwen2.5:1.5b.
+ * Sends properly structured JSON payload with system prompt, conversation history, and user prompt.
+ *
+ * @param array $messages Array of ['role' => 'user'|'assistant'|'system', 'content' => string]
+ * @param string $systemPrompt Enforces clinical reasoning and telemetry grounding
+ * @return array|null Returns ['text' => string, 'model' => string, 'eval_count' => int] or null on failure
+ */
+function callAiChat(array $messages, $systemPrompt = "") {
+    $formattedMessages = [];
+    if (!empty($systemPrompt)) {
+        $formattedMessages[] = [
+            "role" => "system",
+            "content" => $systemPrompt
+        ];
+    }
+
+    foreach ($messages as $m) {
+        $formattedMessages[] = [
+            "role" => ($m["role"] === "AI" || $m["role"] === "assistant") ? "assistant" : "user",
+            "content" => (string)$m["content"]
+        ];
+    }
+
+    $payload = json_encode([
+        "model" => OLLAMA_MODEL,
+        "messages" => $formattedMessages,
+        "stream" => false,
+        "options" => [
+            "temperature" => 0.4,
+            "top_p" => 0.9,
+            "num_predict" => 512
+        ]
+    ]);
+
+    $ch = curl_init(OLLAMA_BASE_URL . "/api/chat");
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => $payload,
+        CURLOPT_HTTPHEADER => [
+            "Content-Type: application/json",
+            "Content-Length: " . strlen($payload)
+        ],
+        CURLOPT_TIMEOUT => 120,
+        CURLOPT_CONNECTTIMEOUT => 15
+    ]);
+
+    $rawResponse = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlErr = curl_error($ch);
+    curl_close($ch);
+
+    if ($curlErr || $httpCode < 200 || $httpCode >= 300 || empty($rawResponse)) {
+        return null;
+    }
+
+    $decoded = json_decode($rawResponse, true);
+    $content = trim($decoded["message"]["content"] ?? "");
+    if ($content === "") {
+        return null;
+    }
+
+    // Clean up any trailing hanging bullet points or unclosed headers
+    $content = preg_replace('/(\n\s*[-*•]\s*(\*\*[^*]*\*\*:?)?\s*)$/', '', $content);
+    $content = trim($content);
+
+    // Hardware Disconnection Rule Guarantee:
+    // If the user asked about a vital metric that is NOT_RECORDED, ensure the exact required instruction is delivered
+    $latestUserMsg = "";
+    for ($i = count($messages) - 1; $i >= 0; $i--) {
+        if (($messages[$i]["role"] ?? "") === "user") {
+            $latestUserMsg = strtolower($messages[$i]["content"] ?? "");
+            break;
+        }
+    }
+
+    if (preg_match('/\b(heart|rate|bpm|pulse)\b/i', $latestUserMsg) && strpos($systemPrompt, "Heart Rate: NOT_RECORDED") !== false) {
+        if (strpos($content, "Settings > Connected Devices") === false || strpos($content, "not been recorded yet") === false) {
+            $content = "Your Heart Rate has not been recorded yet. Please connect your compatible smartwatch or health tracker via Settings > Connected Devices to enable live monitoring.";
+        }
+    } elseif (preg_match('/\b(blood pressure|bp|systolic|diastolic)\b/i', $latestUserMsg) && strpos($systemPrompt, "Blood Pressure: NOT_RECORDED") !== false) {
+        if (strpos($content, "Settings > Connected Devices") === false || strpos($content, "not been recorded yet") === false) {
+            $content = "Your Blood Pressure has not been recorded yet. Please connect your compatible smartwatch or health tracker via Settings > Connected Devices to enable live monitoring.";
+        }
+    } elseif (preg_match('/\b(spo2|oxygen|saturation)\b/i', $latestUserMsg) && strpos($systemPrompt, "SpO2: NOT_RECORDED") !== false) {
+        if (strpos($content, "Settings > Connected Devices") === false || strpos($content, "not been recorded yet") === false) {
+            $content = "Your SpO2 has not been recorded yet. Please connect your compatible smartwatch or health tracker via Settings > Connected Devices to enable live monitoring.";
+        }
+    }
+
+    return [
+        "text" => $content,
+        "model" => OLLAMA_MODEL,
+        "eval_count" => $decoded["eval_count"] ?? 0
+    ];
+}
+
+/**
+ * Streams AI chat chunks in real-time from Ollama /api/chat.
  */
 function streamAiChat(array $messages, $systemPrompt, callable $chunkCallback) {
-    // Falls back to streaming words from intelligent fallback generator
-    return false;
+    $formattedMessages = [];
+    if (!empty($systemPrompt)) {
+        $formattedMessages[] = [
+            "role" => "system",
+            "content" => $systemPrompt
+        ];
+    }
+
+    foreach ($messages as $m) {
+        $formattedMessages[] = [
+            "role" => ($m["role"] === "AI" || $m["role"] === "assistant") ? "assistant" : "user",
+            "content" => (string)$m["content"]
+        ];
+    }
+
+    $payload = json_encode([
+        "model" => OLLAMA_MODEL,
+        "messages" => $formattedMessages,
+        "stream" => true,
+        "options" => [
+            "temperature" => 0.4,
+            "top_p" => 0.9,
+            "num_predict" => 512
+        ]
+    ]);
+
+    $ch = curl_init(OLLAMA_BASE_URL . "/api/chat");
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => $payload,
+        CURLOPT_HTTPHEADER => [
+            "Content-Type: application/json",
+            "Content-Length: " . strlen($payload)
+        ],
+        CURLOPT_TIMEOUT => 120,
+        CURLOPT_CONNECTTIMEOUT => 15,
+        CURLOPT_WRITEFUNCTION => function($curlHandle, $data) use ($chunkCallback) {
+            $lines = explode("\n", $data);
+            foreach ($lines as $line) {
+                $line = trim($line);
+                if (empty($line)) continue;
+                $decoded = json_decode($line, true);
+                if ($decoded) {
+                    $chunk = $decoded["message"]["content"] ?? "";
+                    $isDone = $decoded["done"] ?? false;
+                    if (!empty($chunk) || $isDone) {
+                        $chunkCallback($chunk, $isDone);
+                    }
+                }
+            }
+            return strlen($data);
+        }
+    ]);
+
+    $res = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    return ($res && $httpCode >= 200 && $httpCode < 300);
 }
 
 /**
@@ -55,12 +232,7 @@ function isHealthKnowledgeQuery($query) {
 }
 
 /**
- * Searches the verified RAG knowledge repository using Full-Text and token fallback.
- *
- * @param mysqli $conn
- * @param string $query
- * @param int $limit
- * @return array
+ * Searches verified RAG knowledge base.
  */
 function searchKnowledgeBase($conn, $query, $limit = 3) {
     $results = [];
@@ -73,7 +245,6 @@ function searchKnowledgeBase($conn, $query, $limit = 3) {
         return $results;
     }
 
-    // 1. Full-Text Search in NATURAL LANGUAGE MODE
     $stmt = $conn->prepare(
         "SELECT id, category, topic, content,
                 MATCH(keywords, content) AGAINST(? IN NATURAL LANGUAGE MODE) AS score
@@ -98,14 +269,8 @@ function searchKnowledgeBase($conn, $query, $limit = 3) {
         $stmt->close();
     }
 
-    // 2. Exact word keyword matching fallback
     if (count($results) < $limit) {
-        $stopWords = [
-            "the", "is", "at", "which", "on", "a", "an", "and", "or", "to", "in", "of", "for",
-            "with", "about", "how", "what", "my", "me", "i", "can", "you", "tell", "give", "who",
-            "whom", "whose", "where", "when", "why", "did", "does", "do", "have", "has", "had",
-            "was", "were", "been", "being", "are", "from", "some", "best"
-        ];
+        $stopWords = ["the", "is", "at", "which", "on", "a", "an", "and", "or", "to", "in", "of", "for", "with", "about", "how", "what", "my", "me", "i", "can", "you", "tell", "give"];
         $rawWords = preg_split('/\s+/', strtolower($cleanQuery));
         $keywords = [];
         foreach ($rawWords as $w) {
@@ -159,36 +324,38 @@ function searchKnowledgeBase($conn, $query, $limit = 3) {
 }
 
 /**
- * Detects if the user query is explicitly inquiring about their personal vitals/health data.
+ * Detects if user query is inquiring about their personal vitals or health metrics.
  */
 function isUserPersonalHealthQuery($query) {
     $low = strtolower($query);
-    if (preg_match('/\bmy\b.*?\b(heart|bpm|pulse|vital|vitals|sleep|step|steps|water|hydrate|hydration|calori|calorie|calories|activity|blood pressure|bp|spo2|stat|stats|progress|goal)\b/i', $low)) {
+    if (preg_match('/\b(my|i|today|stats|vitals|readiness|workout|train|score|progress|sleep|steps|water|heart|bpm|pulse|bp|blood pressure|spo2|oxygen|bmi|weight|diet|meal|food)\b/i', $low)) {
         return true;
-    }
-    $personalTriggers = [
-        "how am i doing", "check my", "review my", "how was my", "how did i",
-        "my progress", "my stats", "my recovery today", "my health today"
-    ];
-    foreach ($personalTriggers as $trig) {
-        if (strpos($low, $trig) !== false) {
-            return true;
-        }
     }
     return false;
 }
 
 /**
- * Loads recent multi-turn conversation memory for the user.
+ * Loads recent multi-turn conversation memory, optionally scoped to a chat session.
  */
-function loadConversationHistory($conn, $userId, $limit = 8) {
-    $stmt = $conn->prepare(
-        "SELECT sender, message_text 
-         FROM ai_chat_messages 
-         WHERE user_id = ? 
-         ORDER BY id DESC LIMIT ?"
-    );
-    $stmt->bind_param("ii", $userId, $limit);
+function loadConversationHistory($conn, $userId, $limit = 6, $sessionId = null) {
+    if ($sessionId !== null && (int)$sessionId > 0) {
+        $stmt = $conn->prepare(
+            "SELECT sender, message_text 
+             FROM ai_chat_messages 
+             WHERE user_id = ? AND session_id = ? 
+             ORDER BY id DESC LIMIT ?"
+        );
+        $sId = (int)$sessionId;
+        $stmt->bind_param("iii", $userId, $sId, $limit);
+    } else {
+        $stmt = $conn->prepare(
+            "SELECT sender, message_text 
+             FROM ai_chat_messages 
+             WHERE user_id = ? 
+             ORDER BY id DESC LIMIT ?"
+        );
+        $stmt->bind_param("ii", $userId, $limit);
+    }
     $stmt->execute();
     $res = $stmt->get_result();
     $rows = [];
@@ -203,76 +370,100 @@ function loadConversationHistory($conn, $userId, $limit = 8) {
 }
 
 /**
- * Compiles patient profile and vitals telemetry.
+ * Compiles patient telemetry feature store from the database.
+ * If sensor readings are missing or 0, marks them explicitly as "NOT_RECORDED" to trigger the hardware warning rule.
  */
 function fetchUserHealthContext($conn, $userId) {
     $ctx = [
-        "name" => "User",
+        "name" => "there",
         "age" => null,
         "gender" => null,
-        "height_cm" => null,
-        "weight_kg" => null,
-        "bmi" => null,
-        "bmi_category" => null,
+        "height_cm" => "NOT_RECORDED",
+        "weight_kg" => "NOT_RECORDED",
+        "bmi_value" => "NOT_RECORDED",
+        "bmi_category" => "NOT_RECORDED",
         "primary_goal" => "General Wellness",
-        "heart_rate" => null,
-        "spo2" => null,
-        "blood_pressure" => null,
-        "today_steps" => 0,
-        "today_calories" => 0,
-        "last_sleep_hours" => null,
-        "last_sleep_score" => null,
-        "today_water_ml" => 0,
-        "water_target_ml" => 2000
+        "hr_current" => "NOT_RECORDED",
+        "hr_resting" => "NOT_RECORDED",
+        "blood_pressure" => "NOT_RECORDED",
+        "spo2" => "NOT_RECORDED",
+        "steps_current" => 0,
+        "steps_target" => 10000,
+        "water_current_ml" => 0,
+        "water_target_ml" => 2500,
+        "recent_activity_zone" => "Resting / Sedentary",
+        "last_sleep_hours" => "NOT_RECORDED",
+        "last_sleep_score" => null
     ];
 
-    // 1. Profile & Goals
+    // 1. Profile: Height, Weight, Age, Gender, Goal
     $uStmt = $conn->prepare(
-        "SELECT u.name, u.email, u.primary_goal, 
-                p.age, p.gender, p.height_cm, p.weight_kg, p.blood_group
+        "SELECT u.name, u.email, u.primary_goal, u.height AS u_height, u.weight AS u_weight, u.age AS u_age, u.gender AS u_gender,
+                p.age AS p_age, p.gender AS p_gender, p.height_cm AS p_height, p.weight_kg AS p_weight
          FROM users u
          LEFT JOIN user_profiles p ON u.id = p.user_id
          WHERE u.id = ? LIMIT 1"
     );
-    $uStmt->bind_param("i", $userId);
-    $uStmt->execute();
-    $uRes = $uStmt->get_result()->fetch_assoc();
-    $uStmt->close();
+    if ($uStmt) {
+        $uStmt->bind_param("i", $userId);
+        $uStmt->execute();
+        $uRes = $uStmt->get_result()->fetch_assoc();
+        $uStmt->close();
 
-    if ($uRes) {
-        if (!empty($uRes["name"])) $ctx["name"] = $uRes["name"];
-        $ctx["age"] = $uRes["age"];
-        $ctx["gender"] = $uRes["gender"];
-        $ctx["height_cm"] = $uRes["height_cm"];
-        $ctx["weight_kg"] = $uRes["weight_kg"];
-        if (!empty($uRes["primary_goal"])) $ctx["primary_goal"] = $uRes["primary_goal"];
+        if ($uRes) {
+            if (!empty($uRes["name"])) {
+                $ctx["name"] = explode(" ", trim($uRes["name"]))[0];
+            }
+            $age = $uRes["p_age"] ?: $uRes["u_age"];
+            if ($age && (int)$age > 0) $ctx["age"] = (int)$age;
 
-        if ($ctx["height_cm"] > 0 && $ctx["weight_kg"] > 0) {
-            $hM = $ctx["height_cm"] / 100.0;
-            $bmiVal = round($ctx["weight_kg"] / ($hM * $hM), 1);
-            $ctx["bmi"] = $bmiVal;
-            if ($bmiVal < 18.5) $ctx["bmi_category"] = "Underweight";
-            elseif ($bmiVal < 25.0) $ctx["bmi_category"] = "Normal weight";
-            elseif ($bmiVal < 30.0) $ctx["bmi_category"] = "Overweight";
-            else $ctx["bmi_category"] = "Obesity";
+            $gender = $uRes["p_gender"] ?: $uRes["u_gender"];
+            if (!empty($gender)) $ctx["gender"] = trim($gender);
+
+            if (!empty($uRes["primary_goal"])) $ctx["primary_goal"] = trim($uRes["primary_goal"]);
+
+            $heightVal = (float)($uRes["p_height"] ?: $uRes["u_height"] ?: 0);
+            $weightVal = (float)($uRes["p_weight"] ?: $uRes["u_weight"] ?: 0);
+
+            if ($heightVal > 0) {
+                $ctx["height_cm"] = round($heightVal, 1);
+            }
+            if ($weightVal > 0) {
+                $ctx["weight_kg"] = round($weightVal, 1);
+            }
+
+            if ($heightVal > 0 && $weightVal > 0) {
+                $hM = $heightVal / 100.0;
+                $bmi = round($weightVal / ($hM * $hM), 1);
+                $ctx["bmi_value"] = $bmi;
+                if ($bmi < 18.5) {
+                    $ctx["bmi_category"] = "Underweight";
+                } elseif ($bmi < 25.0) {
+                    $ctx["bmi_category"] = "Normal weight";
+                } elseif ($bmi < 30.0) {
+                    $ctx["bmi_category"] = "Overweight";
+                } else {
+                    $ctx["bmi_category"] = "Obese";
+                }
+            }
         }
     }
 
-    // Check user_health_goals table
+    // 2. Health Goals Targets
     try {
-        $gStmt = $conn->prepare("SELECT primary_goal FROM user_health_goals WHERE user_id = ? LIMIT 1");
+        $gStmt = $conn->prepare("SELECT primary_goal, target_steps, target_water_ml, target_weight_kg FROM user_health_goals WHERE user_id = ? LIMIT 1");
         if ($gStmt) {
             $gStmt->bind_param("i", $userId);
             $gStmt->execute();
             $gRes = $gStmt->get_result()->fetch_assoc();
             $gStmt->close();
-            if (!empty($gRes["primary_goal"])) {
-                $ctx["primary_goal"] = $gRes["primary_goal"];
-            }
+            if (!empty($gRes["primary_goal"])) $ctx["primary_goal"] = $gRes["primary_goal"];
+            if (!empty($gRes["target_steps"]) && (int)$gRes["target_steps"] > 0) $ctx["steps_target"] = (int)$gRes["target_steps"];
+            if (!empty($gRes["target_water_ml"]) && (int)$gRes["target_water_ml"] > 0) $ctx["water_target_ml"] = (int)$gRes["target_water_ml"];
         }
     } catch (\Exception $e) {}
 
-    // 2. Latest Vitals
+    // 3. Live Vitals from DB (Heart Rate, Blood Pressure, SpO2)
     $vStmt = $conn->prepare(
         "SELECT heart_rate, spo2, systolic_bp, diastolic_bp, logged_at 
          FROM vitals_logs 
@@ -286,18 +477,63 @@ function fetchUserHealthContext($conn, $userId) {
         $vStmt->close();
 
         if ($vRes) {
-            if ($vRes["heart_rate"]) $ctx["heart_rate"] = (int)$vRes["heart_rate"];
-            if ($vRes["spo2"]) $ctx["spo2"] = (int)$vRes["spo2"];
-            if ($vRes["systolic_bp"] && $vRes["diastolic_bp"]) {
-                $ctx["blood_pressure"] = $vRes["systolic_bp"] . "/" . $vRes["diastolic_bp"] . " mmHg";
+            if (!empty($vRes["heart_rate"]) && (int)$vRes["heart_rate"] > 0) {
+                $ctx["hr_current"] = (int)$vRes["heart_rate"];
+            }
+            if (!empty($vRes["spo2"]) && (int)$vRes["spo2"] > 0) {
+                $ctx["spo2"] = (int)$vRes["spo2"] . "%";
+            }
+            if (!empty($vRes["systolic_bp"]) && !empty($vRes["diastolic_bp"]) && (int)$vRes["systolic_bp"] > 0 && (int)$vRes["diastolic_bp"] > 0) {
+                $ctx["blood_pressure"] = (int)$vRes["systolic_bp"] . "/" . (int)$vRes["diastolic_bp"] . " mmHg";
             }
         }
     }
 
-    // 3. Today's Activity
+    // Check vitals_readings table as backup
+    if ($ctx["hr_current"] === "NOT_RECORDED") {
+        $vrStmt = $conn->prepare("SELECT value_numeric FROM vitals_readings WHERE user_id = ? AND reading_type = 'heart_rate' ORDER BY recorded_at DESC LIMIT 1");
+        if ($vrStmt) {
+            $vrStmt->bind_param("i", $userId);
+            $vrStmt->execute();
+            $val = $vrStmt->get_result()->fetch_assoc();
+            $vrStmt->close();
+            if ($val && (float)$val["value_numeric"] > 0) {
+                $ctx["hr_current"] = (int)$val["value_numeric"];
+            }
+        }
+    }
+
+    if ($ctx["spo2"] === "NOT_RECORDED") {
+        $vsStmt = $conn->prepare("SELECT value_numeric FROM vitals_readings WHERE user_id = ? AND reading_type = 'spo2' ORDER BY recorded_at DESC LIMIT 1");
+        if ($vsStmt) {
+            $vsStmt->bind_param("i", $userId);
+            $vsStmt->execute();
+            $val = $vsStmt->get_result()->fetch_assoc();
+            $vsStmt->close();
+            if ($val && (float)$val["value_numeric"] > 0) {
+                $ctx["spo2"] = (int)$val["value_numeric"] . "%";
+            }
+        }
+    }
+
+    // Resting Heart Rate Baseline
+    $rStmt = $conn->prepare("SELECT MIN(heart_rate) as resting_hr FROM vitals_logs WHERE user_id = ? AND heart_rate >= 45 AND heart_rate <= 110");
+    if ($rStmt) {
+        $rStmt->bind_param("i", $userId);
+        $rStmt->execute();
+        $rRes = $rStmt->get_result()->fetch_assoc();
+        $rStmt->close();
+        if ($rRes && (int)$rRes["resting_hr"] > 0) {
+            $ctx["hr_resting"] = (int)$rRes["resting_hr"] . " bpm";
+        } elseif ($ctx["hr_current"] !== "NOT_RECORDED") {
+            $ctx["hr_resting"] = "68 bpm";
+        }
+    }
+
+    // 4. Daily Steps
     $today = date("Y-m-d");
     $actStmt = $conn->prepare(
-        "SELECT COALESCE(SUM(steps), 0) AS total_steps, COALESCE(SUM(calories_burned), 0) AS total_cal 
+        "SELECT COALESCE(SUM(steps), 0) AS total_steps, MAX(activity_type) as last_act 
          FROM activity_sessions 
          WHERE user_id = ? AND DATE(start_time) = ?"
     );
@@ -306,12 +542,42 @@ function fetchUserHealthContext($conn, $userId) {
         $actStmt->execute();
         $actRes = $actStmt->get_result()->fetch_assoc();
         $actStmt->close();
-
-        $ctx["today_steps"] = (int)($actRes["total_steps"] ?? 0);
-        $ctx["today_calories"] = (int)($actRes["total_cal"] ?? 0);
+        $ctx["steps_current"] = (int)($actRes["total_steps"] ?? 0);
     }
 
-    // 4. Latest Sleep
+    // 5. Exertion Zone
+    $hrNum = is_numeric($ctx["hr_current"]) ? (int)$ctx["hr_current"] : 0;
+    if ($hrNum > 140) {
+        $ctx["recent_activity_zone"] = "Anaerobic / Peak Zone";
+    } elseif ($hrNum > 115) {
+        $ctx["recent_activity_zone"] = "Aerobic / Cardio Zone";
+    } elseif ($hrNum > 95) {
+        $ctx["recent_activity_zone"] = "Fat Burn / Active Zone";
+    } elseif ($ctx["steps_current"] > 5000) {
+        $ctx["recent_activity_zone"] = "Active Recovery";
+    } else {
+        $ctx["recent_activity_zone"] = "Resting / Sedentary";
+    }
+
+    // 6. Today's Hydration
+    $hStmt = $conn->prepare(
+        "SELECT COALESCE(SUM(volume_ml), SUM(intake_ml), SUM(amount_ml), 0) AS total_ml,
+                COALESCE(MAX(target_ml), 2500) AS target 
+         FROM hydration_logs 
+         WHERE user_id = ? AND (log_date = ? OR date_string = ? OR DATE(logged_at) = ?)"
+    );
+    if ($hStmt) {
+        $hStmt->bind_param("isss", $userId, $today, $today, $today);
+        $hStmt->execute();
+        $hRes = $hStmt->get_result()->fetch_assoc();
+        $hStmt->close();
+        if ($hRes) {
+            $ctx["water_current_ml"] = (int)($hRes["total_ml"] ?? 0);
+            if (!empty($hRes["target"])) $ctx["water_target_ml"] = (int)$hRes["target"];
+        }
+    }
+
+    // 7. Latest Sleep
     $sStmt = $conn->prepare(
         "SELECT duration_minutes, quality_score 
          FROM sleep_logs 
@@ -323,7 +589,6 @@ function fetchUserHealthContext($conn, $userId) {
         $sStmt->execute();
         $sRes = $sStmt->get_result()->fetch_assoc();
         $sStmt->close();
-
         if ($sRes) {
             $durM = (int)$sRes["duration_minutes"];
             $h = floor($durM / 60);
@@ -333,162 +598,193 @@ function fetchUserHealthContext($conn, $userId) {
         }
     }
 
-    // 5. Today's Hydration
-    $hStmt = $conn->prepare(
-        "SELECT COALESCE(SUM(volume_ml), SUM(intake_ml), SUM(amount_ml), 0) AS total_ml,
-                COALESCE(MAX(target_ml), 2000) AS target 
-         FROM hydration_logs 
-         WHERE user_id = ? AND (log_date = ? OR date_string = ? OR DATE(logged_at) = ?)"
-    );
-    if ($hStmt) {
-        $hStmt->bind_param("isss", $userId, $today, $today, $today);
-        $hStmt->execute();
-        $hRes = $hStmt->get_result()->fetch_assoc();
-        $hStmt->close();
-
-        if ($hRes) {
-            $ctx["today_water_ml"] = (int)($hRes["total_ml"] ?? 0);
-            if (!empty($hRes["target"])) $ctx["water_target_ml"] = (int)$hRes["target"];
-        }
-    }
-
     return $ctx;
 }
 
 /**
- * Builds a versatile general-purpose system prompt with optional RAG injection.
+ * Builds the comprehensive VitalSync AI system prompt enforcing all clinical, reasoning, and grounding rules.
  */
-function buildGeneralAiSystemPrompt(array $ctx = [], array $ragArticles = [], $includeVitals = false) {
+function buildGeneralAiSystemPrompt(array $ctx = [], array $ragArticles = [], $includeVitals = true) {
+    $heightStr = ($ctx["height_cm"] !== "NOT_RECORDED") ? "**{$ctx["height_cm"]} cm**" : "NOT_RECORDED";
+    $weightStr = ($ctx["weight_kg"] !== "NOT_RECORDED") ? "**{$ctx["weight_kg"]} kg**" : "NOT_RECORDED";
+    $bmiStr = ($ctx["bmi_value"] !== "NOT_RECORDED") ? "**{$ctx["bmi_value"]}**" : "NOT_RECORDED";
+    $bmiCategoryStr = ($ctx["bmi_category"] !== "NOT_RECORDED") ? $ctx["bmi_category"] : "NOT_RECORDED";
+    $hrCurrentStr = is_numeric($ctx["hr_current"]) ? "**{$ctx["hr_current"]} bpm**" : "NOT_RECORDED";
+    $hrRestingStr = ($ctx["hr_resting"] !== "NOT_RECORDED") ? "**{$ctx["hr_resting"]}**" : "NOT_RECORDED";
+    $bpStr = ($ctx["blood_pressure"] !== "NOT_RECORDED") ? "**{$ctx["blood_pressure"]}**" : "NOT_RECORDED";
+    $spo2Str = ($ctx["spo2"] !== "NOT_RECORDED") ? "**{$ctx["spo2"]}**" : "NOT_RECORDED";
+
+    $stepsCurrent = (int)($ctx["steps_current"] ?? 0);
+    $stepsTarget = (int)($ctx["steps_target"] ?? 10000);
+    $waterCurrent = (int)($ctx["water_current_ml"] ?? 0);
+    $waterTarget = (int)($ctx["water_target_ml"] ?? 2500);
+
+    $stepsCurrentStr = number_format($stepsCurrent);
+    $stepsTargetStr = number_format($stepsTarget);
+    $waterCurrentStr = number_format($waterCurrent);
+    $waterTargetStr = number_format($waterTarget);
+    $recentExertion = $ctx["recent_activity_zone"] ?? "Resting / Sedentary";
+    $goal = $ctx["primary_goal"] ?? "General Wellness";
+
     $prompt = <<<EOT
-You are VitalSync AI, a highly capable, empathetic, and unrestricted general-purpose AI assistant.
+You are VitalSync AI, a concise wellness coach. Provide complete, well-rounded answers. Always conclude all bullet points and thoughts cleanly within 250-300 words. Never leave a bullet point or sentence unfinished.
 
-CAPABILITIES & BEHAVIOR:
-1. Universal Versatility: You comfortably answer questions on ANY topic: cinema, history, technology, programming, literature, science, philosophy, pop culture, humor, and general curiosity.
-2. Natural, Direct Style: For general questions (e.g., movies, trivia, coding, explanations), answer directly, engagingly, and naturally WITHOUT forcing health stats, disclaimers, or fitness goals.
-3. Health, Nutrition & Medical Authority: When discussing wellness, nutrition, fitness, or physiology, provide accurate, evidence-based, and encouraging insights.
-4. Grounded in Verified References: When [VERIFIED KNOWLEDGE BASE] is provided below, prioritize its facts for accuracy.
-5. Serious Medical Signs: Urge immediate clinical emergency care if the user describes severe acute symptoms (e.g., crushing chest pain, stroke signs, acute breathlessness).
-6. Formatting: Use clean markdown, bullet points, and concise paragraphs for high readability.
+### CORE CLINICAL & BEHAVIORAL RULES:
+1. NLP Tolerance:
+   Seamlessly infer and understand the user's intent despite broken grammar, spelling typos, abbreviations, or shorthand without pointing them out. Never critique or correct the user's phrasing.
+2. Hardware Disconnection Check:
+   If any requested or relevant vital (Heart Rate, Blood Pressure, SpO2) is marked "NOT_RECORDED", you MUST explicitly instruct the user:
+   "Your [metric] has not been recorded yet. Please connect your compatible smartwatch or health tracker via Settings > Connected Devices to enable live monitoring."
+   (Example: If Heart Rate is NOT_RECORDED and the user asks about their heart rate, reply: "Your Heart Rate has not been recorded yet. Please connect your compatible smartwatch or health tracker via Settings > Connected Devices to enable live monitoring.")
+3. BMI & Weight Guidance:
+   If the user's BMI is between 25.0 and 29.9, clearly state that it falls into the overweight category. Do not give false flattery. Suggest an actionable 300–400 kcal deficit, daily brisk walking, and adequate protein intake.
+4. Activity Analysis:
+   Compare actual steps directly against the daily goal (**{$stepsCurrentStr} / {$stepsTargetStr} steps**). If steps are 0 or lagging behind, highlight the deficit and give realistic pacing tips.
+5. Diet Plans & Nutrition Guidance:
+   If asked for a diet plan or nutrition guidance, output a clear, structured meal breakdown with sections:
+   - Breakfast: Balanced protein and complex carbs
+   - Lunch: Lean protein, fiber-rich vegetables, and whole grains
+   - Snack: Light, high-protein or fruit-based option
+   - Dinner: Digestible protein and micronutrient-dense vegetables
+6. Formatting Standards:
+   Use clean markdown bullet points. ALWAYS bold all metrics, numbers, and targets (e.g., **26.1 BMI**, **0 / 10,000 steps**, **1,200 / 2,500 ml**, **74 bpm**).
+7. Safety:
+   You are a lifestyle wellness companion, not a licensed medical provider. If emergency symptoms (severe chest pressure, fainting, severe shortness of breath) are described, urge immediate medical care.
+
+[PATIENT REAL-TIME TELEMETRY SNAPSHOT]
+- Height: {$heightStr}
+- Weight: {$weightStr}
+- BMI: {$bmiStr} ({$bmiCategoryStr})
+- Heart Rate: {$hrCurrentStr} (Resting baseline: {$hrRestingStr})
+- Blood Pressure: {$bpStr}
+- SpO2 (Oxygen Saturation): {$spo2Str}
+- Daily Steps: **{$stepsCurrentStr}** / **{$stepsTargetStr}** target
+- Hydration Volume: **{$waterCurrentStr}** / **{$waterTargetStr}** ml target
+- Current Exertion: {$recentExertion}
+- Primary Health Goal: {$goal}
+[END_TELEMETRY]
 EOT;
 
-    // RAG Knowledge Base Injection
     if (!empty($ragArticles)) {
-        $prompt .= "\n\n[VERIFIED KNOWLEDGE BASE (RAG CONTEXT)]:\n";
+        $prompt .= "\n\n[VERIFIED MEDICAL & NUTRITION FACTS (RAG)]:\n";
         foreach ($ragArticles as $art) {
-            $prompt .= "- Topic: {$art['topic']} ({$art['category']})\n  Content: {$art['content']}\n";
+            $prompt .= "- {$art['topic']}: {$art['content']}\n";
         }
-        $prompt .= "\nUse this verified reference knowledge to answer the user's question accurately.\n";
-    }
-
-    // Only inject user telemetry if the query is personally health-related
-    if ($includeVitals) {
-        $name = $ctx["name"] ?: "User";
-        $age = $ctx["age"] ? "{$ctx["age"]} yrs" : "Adult";
-        $gender = $ctx["gender"] ?: "Unspecified";
-        $bmi = $ctx["bmi"] ? "{$ctx["bmi"]} ({$ctx["bmi_category"]})" : "Not recorded";
-        $goal = $ctx["primary_goal"] ?: "General Wellness";
-        $hr = $ctx["heart_rate"] ? "{$ctx["heart_rate"]} BPM" : "72 BPM";
-        $bp = $ctx["blood_pressure"] ?: "120/80 mmHg";
-        $spo2 = $ctx["spo2"] ? "{$ctx["spo2"]}%" : "98%";
-        $steps = number_format($ctx["today_steps"]);
-        $cals = number_format($ctx["today_calories"]);
-        $sleep = $ctx["last_sleep_hours"] ? "{$ctx["last_sleep_hours"]} (Score: {$ctx["last_sleep_score"]}/100)" : "7h 30m";
-        $water = "{$ctx["today_water_ml"]} ml / {$ctx["water_target_ml"]} ml";
-
-        $prompt .= <<<EOT
-
-[PATIENT TELEMETRY CONTEXT (CITE ONLY IF RELEVANT)]:
-- Name: $name ($age, $gender)
-- BMI: $bmi, Goal: $goal
-- Resting Heart Rate: $hr, Blood Pressure: $bp, SpO2: $spo2
-- Daily Activity: $steps steps, $cals kcal
-- Last Sleep: $sleep
-- Hydration: $water
-EOT;
     }
 
     return $prompt;
 }
 
 /**
- * Versatile multi-domain intelligent engine for health, vitals, RAG, and general inquiries.
+ * Intelligent zero-downtime fallback engine if Ollama is starting or unavailable.
+ * Strictly enforces hardware warnings, BMI guidance, step deficits, and meal breakdowns.
  */
 function generateIntelligentFallbackReply($userText, array $ctx, array $ragArticles = []) {
-    $low = strtolower($userText);
+    $low = strtolower(trim($userText));
     $name = $ctx["name"] ?: "there";
 
-    // 1. Personal Vitals / Telemetry Queries (Top Priority if user asks about THEIR data)
-    if (isUserPersonalHealthQuery($userText)) {
-        $hr = $ctx["heart_rate"] ?: 74;
-        $steps = $ctx["today_steps"] ?: 6420;
-        $sleep = $ctx["last_sleep_hours"] ?: "7h 25m";
-        $water = $ctx["today_water_ml"] ?: 1400;
-        $targetWater = $ctx["water_target_ml"] ?: 2000;
-        $goal = $ctx["primary_goal"] ?: "Build Muscle";
-
-        if (strpos($low, "heart") !== false || strpos($low, "bpm") !== false || strpos($low, "pulse") !== false) {
-            return "Your latest resting heart rate is **{$hr} BPM**, which is in the healthy clinical range (60–100 BPM). Your cardiovascular trends reflect balanced autonomic regulation.";
+    // 1. Critical Safety Classifier & Emergency Guardrails
+    $emergencyTerms = ["chest pain", "chest pressure", "heart attack", "can't breathe", "cannot breathe", "fainting", "passed out", "blacking out", "severe breathlessness"];
+    $hrNum = is_numeric($ctx["hr_current"]) ? (int)$ctx["hr_current"] : -1;
+    $hasEmergency = false;
+    foreach ($emergencyTerms as $t) {
+        if (strpos($low, $t) !== false) {
+            $hasEmergency = true;
+            break;
         }
-        if (strpos($low, "sleep") !== false || strpos($low, "tired") !== false) {
-            return "Your last recorded sleep session was **{$sleep}**" . ($ctx["last_sleep_score"] ? " with a quality score of **{$ctx["last_sleep_score"]}/100**" : "") . ". For your current goal ({$goal}), deep and REM sleep cycles support optimal physical and cognitive recovery.";
-        }
-        if (strpos($low, "water") !== false || strpos($low, "hydrate") !== false || strpos($low, "drink") !== false) {
-            $pct = round(($water / max(1, $targetWater)) * 100);
-            return "Hydration Check: You have logged **{$water} ml** today towards your **{$targetWater} ml** target ({$pct}%). " . ($water < $targetWater ? "Drinking 2 more glasses of water will help you meet your daily goal." : "Great job hitting your hydration goal today!");
-        }
-        if (strpos($low, "step") !== false || strpos($low, "activity") !== false) {
-            return "Today's Activity: You have logged **" . number_format($steps) . " steps** and burned approximately **" . number_format($ctx["today_calories"]) . " kcal**.";
-        }
-
-        return "Health Snapshot for {$name}:\n- Resting Heart Rate: {$hr} BPM\n- Today's Steps: " . number_format($steps) . "\n- Sleep: {$sleep}\n- Hydration: {$water} ml / {$targetWater} ml\n- Current Goal: {$goal}";
     }
 
-    // 2. Verified RAG Knowledge Base Retrieval
+    if ($hasEmergency || ($hrNum > 150 && strpos($ctx["recent_activity_zone"], "Resting") !== false)) {
+        $hrNotice = $hrNum > 0 ? " Your recorded heart rate is currently **{$hrNum} bpm**." : "";
+        return "⚠️ **Urgent Medical Alert**: Please stop what you're doing right now and seek immediate clinical or emergency assistance.{$hrNotice} Severe symptoms like chest pressure or acute shortness of breath require immediate physician evaluation.";
+    }
+
+    // 2. Hardware Disconnection Checks (Rule: Missing or NOT_RECORDED)
+    if (preg_match('/\b(heart|rate|bpm|pulse)\b/i', $low) && $ctx["hr_current"] === "NOT_RECORDED") {
+        return "Your Heart Rate has not been recorded yet. Please connect your compatible smartwatch or health tracker via Settings > Connected Devices to enable live monitoring.";
+    }
+
+    if (preg_match('/\b(blood pressure|bp|systolic|diastolic)\b/i', $low) && $ctx["blood_pressure"] === "NOT_RECORDED") {
+        return "Your Blood Pressure has not been recorded yet. Please connect your compatible smartwatch or health tracker via Settings > Connected Devices to enable live monitoring.";
+    }
+
+    if (preg_match('/\b(spo2|oxygen|saturation|o2)\b/i', $low) && $ctx["spo2"] === "NOT_RECORDED") {
+        return "Your SpO2 has not been recorded yet. Please connect your compatible smartwatch or health tracker via Settings > Connected Devices to enable live monitoring.";
+    }
+
+    // 3. BMI & Weight Guidance (Rule: BMI between 25.0 and 29.9 -> Overweight guidance)
+    $bmiVal = is_numeric($ctx["bmi_value"]) ? (float)$ctx["bmi_value"] : null;
+    if (preg_match('/\b(bmi|weight|overweight|fat|body mass)\b/i', $low)) {
+        if ($bmiVal !== null && $bmiVal >= 25.0 && $bmiVal <= 29.9) {
+            return "Looking at your stats, your current BMI is **{$bmiVal}**, which falls into the **overweight** category (25.0–29.9).\n\nHere is an actionable, evidence-based plan to move toward an optimal range:\n• **Caloric Deficit**: Create a modest deficit of **300–400 kcal** below maintenance per day.\n• **Daily Activity**: Target **8,000–10,000 brisk steps** daily to stimulate non-exercise activity thermogenesis.\n• **Protein Target**: Consume **1.6–2.0g of protein** per kg of target bodyweight to preserve lean muscle tissue while losing fat.";
+        } elseif ($bmiVal !== null) {
+            return "Your recorded BMI is **{$bmiVal}** ({$ctx["bmi_category"]}) based on your height of **{$ctx["height_cm"]} cm** and weight of **{$ctx["weight_kg"]} kg**. Keep up structured daily activity and balanced hydration to maintain metabolic health!";
+        } else {
+            return "Your height or weight has not been recorded yet. Please update your profile stats in Settings > Profile so I can calculate your live BMI.";
+        }
+    }
+
+    // 4. Diet Plans & Nutrition Breakdown (Rule: Breakfast, Lunch, Snack, Dinner)
+    if (preg_match('/\b(diet|meal|nutrition|food plan|eating plan|what to eat|meal plan)\b/i', $low)) {
+        return "Here is a structured, balanced daily meal plan designed for sustained energy, recovery, and lean muscle support:\n\n" .
+               "• **Breakfast**: 3 scrambled whole eggs with spinach, 1 slice of whole-wheat toast, and black coffee or green tea (**~350 kcal, 24g protein**).\n" .
+               "• **Lunch**: Grilled chicken breast or grilled paneer (**150g**) with 1 cup cooked brown rice and a mixed leafy garden salad (**~500 kcal, 38g protein**).\n" .
+               "• **Snack**: Greek yogurt (**200g**) topped with a handful of fresh berries or almonds (**~180 kcal, 18g protein**).\n" .
+               "• **Dinner**: Baked fish or spiced lentils/dal (**1 bowl**) paired with steamed broccoli, carrots, and a small sweet potato (**~450 kcal, 32g protein**).\n\n" .
+               "Drink at least **2,500 ml** of water throughout the day to support optimal nutrient absorption.";
+    }
+
+    // 5. Activity Analysis & Step Deficit (Rule: Compare actual vs target, highlight deficit)
+    $steps = (int)($ctx["steps_current"] ?? 0);
+    $stepTarget = (int)($ctx["steps_target"] ?? 10000);
+    $stepDeficit = max(0, $stepTarget - $steps);
+    $stepsStr = number_format($steps);
+    $targetStr = number_format($stepTarget);
+    $deficitStr = number_format($stepDeficit);
+
+    if (preg_match('/\b(step|steps|walk|walking|activity|distance)\b/i', $low)) {
+        if ($steps === 0) {
+            return "Looking at your activity, you have logged **0 / {$targetStr} steps** today, leaving a full **{$deficitStr} step deficit**.\n\n• **Tip**: Knock out a brisk 15-minute walk right now to log your first **1,500 steps** and build momentum for the day!";
+        } elseif ($stepDeficit > 0) {
+            $pct = round(($steps / $stepTarget) * 100);
+            return "You have clocked **{$stepsStr} / {$targetStr} steps** today (**{$pct}%** of your goal), with a current deficit of **{$deficitStr} steps**.\n\n• **Pacing Advice**: A 25-minute evening stroll or a post-dinner walk will help you close the remaining **{$deficitStr} steps** smoothly!";
+        } else {
+            return "Outstanding effort! You've crushed your daily step target with **{$stepsStr} / {$targetStr} steps** logged today. Excellent cardiovascular discipline!";
+        }
+    }
+
+    // 6. Hydration Slot
+    $water = (int)($ctx["water_current_ml"] ?? 0);
+    $waterTarget = (int)($ctx["water_target_ml"] ?? 2500);
+    if (preg_match('/\b(water|hydrate|hydration|drink|fluid)\b/i', $low)) {
+        $waterStr = number_format($water);
+        $wTargetStr = number_format($waterTarget);
+        $wPct = $waterTarget > 0 ? round(($water / $waterTarget) * 100) : 0;
+        return "Hydration Status: You have logged **{$waterStr} / {$wTargetStr} ml** today (**{$wPct}%** achieved). " .
+               ($water < $waterTarget ? "Keep sipping an extra **250 ml** every couple of hours to keep intracellular hydration and muscle endurance high." : "You have hit your hydration goal—stellar work!");
+    }
+
+    // 7. General Status Check
+    if (preg_match('/\b(status|overview|how am i doing|progress|summary|check|vitals)\b/i', $low)) {
+        $hrDisplay = is_numeric($ctx["hr_current"]) ? "**{$ctx["hr_current"]} bpm**" : "NOT_RECORDED";
+        $bpDisplay = $ctx["blood_pressure"] !== "NOT_RECORDED" ? "**{$ctx["blood_pressure"]}**" : "NOT_RECORDED";
+        $spo2Display = $ctx["spo2"] !== "NOT_RECORDED" ? "**{$ctx["spo2"]}**" : "NOT_RECORDED";
+
+        return "Here is your live VitalSync health overview:\n" .
+               "• **Daily Steps**: **{$stepsStr} / {$targetStr} steps** (" . ($steps === 0 ? "Deficit: **{$targetStr} steps**" : "Deficit: **{$deficitStr} steps**") . ")\n" .
+               "• **Hydration**: **" . number_format($water) . " / " . number_format($waterTarget) . " ml**\n" .
+               "• **Heart Rate**: {$hrDisplay}\n" .
+               "• **Blood Pressure**: {$bpDisplay}\n" .
+               "• **SpO2**: {$spo2Display}\n\n" .
+               ($hrDisplay === "NOT_RECORDED" ? "Notice: Your Heart Rate has not been recorded yet. Please connect your compatible smartwatch or health tracker via Settings > Connected Devices to enable live monitoring." : "Your vitals are tracking steadily.");
+    }
+
+    // 8. RAG Knowledge Base Retrieval Fallback
     if (!empty($ragArticles)) {
-        $primary = $ragArticles[0];
-        $topic = $primary["topic"];
-        $content = $primary["content"];
-
-        return "Here is verified reference information regarding **{$topic}**:\n\n{$content}" . 
-               (count($ragArticles) > 1 ? "\n\nAdditionally, regarding **{$ragArticles[1]['topic']}**: " . substr($ragArticles[1]['content'], 0, 180) . "..." : "");
+        $art = $ragArticles[0];
+        return "Here is verified reference information regarding **{$art['topic']}**:\n\n{$art['content']}\n\n• Maintain consistent hydration (**" . number_format($water) . " ml** logged) and daily movement to support optimal physiological recovery!";
     }
 
-    // 3. Movies / Cinema / Pop Culture
-    if (strpos($low, "movie") !== false || strpos($low, "inception") !== false || strpos($low, "film") !== false || strpos($low, "director") !== false || strpos($low, "actor") !== false || strpos($low, "cinema") !== false) {
-        if (strpos($low, "inception") !== false) {
-            return "**Inception (2010)** was written and directed by **Christopher Nolan**! It stars Leonardo DiCaprio as Dom Cobb, an extractor who steals secrets from deep within the subconscious during dream states. With mind-bending practical effects, Hans Zimmer's iconic score, and an ambiguous spinning totem ending, it remains one of cinema's greatest sci-fi masterpieces.";
-        }
-        if (strpos($low, "recommend") !== false || strpos($low, "suggest") !== false) {
-            return "Here are a few acclaimed movie recommendations across different genres:\n\n1. **Sci-Fi / Mind-Bender:** *Interstellar* (2014) or *Arrival* (2016)\n2. **Inspirational / Sports:** *Whiplash* (2014) or *Rocky* (1976)\n3. **Thriller / Mystery:** *Knives Out* (2019) or *Shutter Island* (2010)\n4. **Feel-Good / Uplifting:** *The Secret Life of Walter Mitty* (2013)\n\nWhat genre or mood are you in the mood for?";
-        }
-        return "Cinema is one of the most powerful storytelling mediums! Whether you love sci-fi epics, intense thrillers, or quiet character dramas, great films combine screenwriting, cinematography, sound design, and acting. Tell me your favorite movie or genre and I'll share some great insights or recommendations!";
-    }
-
-    // 4. Technology & Programming
-    if (strpos($low, "python") !== false || strpos($low, "code") !== false || strpos($low, "program") !== false || strpos($low, "javascript") !== false || strpos($low, "react") !== false || strpos($low, "css") !== false || strpos($low, "api") !== false || strpos($low, "ai") !== false) {
-        if (strpos($low, "python") !== false) {
-            return "**Python** is renowned for its clean syntax, readability, and massive ecosystem. Core strengths:\n\n- **AI & Machine Learning:** PyTorch, TensorFlow, HuggingFace, Scikit-Learn\n- **Web Development:** FastAPI, Django, Flask\n- **Data Analysis & Scripting:** Pandas, NumPy, Requests\n\nIs there a specific project or concept in Python you'd like to build?";
-        }
-        return "Technology and software engineering thrive on modular architecture, clean abstractions, and continuous iteration. Whether you're working with REST APIs, state management in modern frameworks, or database optimization, feel free to ask any specific coding question!";
-    }
-
-    // 5. Humor / Jokes
-    if (strpos($low, "joke") !== false || strpos($low, "funny") !== false) {
-        $jokes = [
-            "Why do programmers prefer dark mode? Because light attracts bugs! 😄",
-            "Why did the database administrator leave his wife? She had one-to-many relationships! 📊",
-            "There are only 10 kinds of people in the world: those who understand binary, and those who don't. 💻",
-            "Why don't scientists trust atoms? Because they make up everything! ⚛️"
-        ];
-        return $jokes[array_rand($jokes)] . "\n\nWant another joke, or would you like to explore something else?";
-    }
-
-    // 6. Greetings / Casual conversation
-    if (preg_match('/^(hi|hello|hey|greetings|good morning|good evening|sup|yo)\b/i', $userText)) {
-        return "Hello! I am your VitalSync AI assistant. I'm here to chat about anything you'd like—from technology, movies, and philosophy to workout recovery, nutrition, and daily wellness. How can I help you today?";
-    }
-
-    // 7. General Knowledge / Versatile Open-Ended Response
-    return "That's an interesting question! Whether we're exploring ideas, analyzing concepts, working through a problem, or discussing health and training, I'm here to provide clear, actionable, and engaging answers. Feel free to give me more details on what you'd like to dive into!";
+    // 9. Conversational Default
+    return "Hello {$name}! I'm tracking your activity: **{$stepsStr} / {$targetStr} steps** and **" . number_format($water) . " ml** water logged today. Ask me anything about your steps, diet plan, workout readiness, or live vitals!";
 }
-

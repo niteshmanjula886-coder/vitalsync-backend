@@ -19,6 +19,10 @@ function respondJson($statusCode, $data) {
 }
 
 function getInputData() {
+    static $cachedData = null;
+    if ($cachedData !== null) {
+        return $cachedData;
+    }
     $raw = file_get_contents("php://input");
     if ($raw !== false && $raw !== null) {
         // Strip UTF-8 BOM if present
@@ -29,7 +33,8 @@ function getInputData() {
     if (!is_array($data)) {
         $data = $_POST;
     }
-    return is_array($data) ? $data : [];
+    $cachedData = is_array($data) ? $data : [];
+    return $cachedData;
 }
 
 /**
