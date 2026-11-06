@@ -3,21 +3,27 @@
 $host = "localhost";
 $username = "root";
 $password = "";
-$database = "vitalsync";
+$database = "vitalsync_db";
 
-$conn = new mysqli($host, $username, $password, $database);
+try {
+    $conn = new mysqli($host, $username, $password, $database);
+} catch (\Throwable $e) {
+    try {
+        $database = "vitalsync";
+        $conn = new mysqli($host, $username, $password, $database);
+    } catch (\Throwable $e2) {
+        error_log("VitalSync database connection failed: " . $e2->getMessage());
 
-if ($conn->connect_error) {
-    error_log("VitalSync database connection failed: " . $conn->connect_error);
+        http_response_code(500);
+        header("Content-Type: application/json; charset=UTF-8");
 
-    http_response_code(500);
-    header("Content-Type: application/json; charset=UTF-8");
-
-    echo json_encode([
-        "success" => false,
-        "message" => "Database connection failed"
-    ]);
-    exit;
+        echo json_encode([
+            "success" => false,
+            "status" => "error",
+            "message" => "Database error: " . $e2->getMessage()
+        ], JSON_UNESCAPED_SLASHES);
+        exit;
+    }
 }
 
 $conn->set_charset("utf8mb4");

@@ -42,7 +42,7 @@ if ($existing) {
     $uStmt->close();
 } else {
     $iStmt = $conn->prepare("INSERT INTO steps_logs (user_id, step_count, target_steps, distance_km, calories_kcal, active_minutes, logged_date) VALUES (?, ?, ?, ?, ?, ?, ?)");
-    $iStmt->bind_param("iidiiis", $userId, $stepCount, $targetSteps, $distanceKm, $caloriesKcal, $activeMinutes, $loggedDate);
+    $iStmt->bind_param("iiidiis", $userId, $stepCount, $targetSteps, $distanceKm, $caloriesKcal, $activeMinutes, $loggedDate);
     $iStmt->execute();
     $recordId = $iStmt->insert_id;
     $iStmt->close();

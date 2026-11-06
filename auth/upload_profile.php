@@ -183,7 +183,7 @@ $conn->close();
 // Build URL
 $scheme = (!empty($_SERVER["HTTPS"]) && $_SERVER["HTTPS"] !== "off") ? "https" : "http";
 $host = $_SERVER["HTTP_HOST"] ?? "localhost";
-$fullImageUrl = $scheme . "://" . $host . "/vitalsync_background/" . $imagePath;
+$fullImageUrl = $scheme . "://" . $host . "/vitalsync-backend/" . $imagePath;
 
 respond(200, [
     "success" => true,

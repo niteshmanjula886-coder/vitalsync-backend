@@ -114,7 +114,7 @@ $conn->close();
 
 $scheme = (!empty($_SERVER["HTTPS"]) && $_SERVER["HTTPS"] !== "off") ? "https" : "http";
 $host = $_SERVER["HTTP_HOST"] ?? "localhost";
-$baseUrl = $scheme . "://" . $host . "/vitalsync_background/";
+$baseUrl = $scheme . "://" . $host . "/vitalsync-backend/";
 
 $rawAvatar = !empty($profile["avatar_url"]) ? $profile["avatar_url"] : $user["profile_image"];
 $avatarUrl = !empty($rawAvatar) ? (preg_match('#^https?://#i', $rawAvatar) ? $rawAvatar : $baseUrl . ltrim($rawAvatar, "/")) : null;

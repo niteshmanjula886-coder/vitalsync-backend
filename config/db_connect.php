@@ -3,7 +3,7 @@
 header("Content-Type: application/json; charset=UTF-8");
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
-header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
+header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Tunnel-Skip-Anti-Abuse");
 
 if ($_SERVER["REQUEST_METHOD"] === "OPTIONS") {
     http_response_code(200);
@@ -11,12 +11,11 @@ if ($_SERVER["REQUEST_METHOD"] === "OPTIONS") {
 }
 
 $host = "localhost";
-$db   = "vitalsync";
+$db   = "vitalsync_db";
 $user = "root";
 $pass = "";
 $charset = "utf8mb4";
 
-$dsn = "mysql:host=$host;dbname=$db;charset=$charset";
 $options = [
     PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
@@ -24,17 +23,25 @@ $options = [
 ];
 
 try {
+    $dsn = "mysql:host=$host;dbname=$db;charset=$charset";
     $pdo = new PDO($dsn, $user, $pass, $options);
     ensureVitalSyncCloudSyncSchema($pdo);
 } catch (\PDOException $e) {
-    http_response_code(500);
-    echo json_encode([
-        "status" => "error",
-        "success" => false,
-        "message" => "Database connection failed: " . $e->getMessage(),
-        "data" => null
-    ]);
-    exit;
+    try {
+        $db = "vitalsync";
+        $dsn = "mysql:host=$host;dbname=$db;charset=$charset";
+        $pdo = new PDO($dsn, $user, $pass, $options);
+        ensureVitalSyncCloudSyncSchema($pdo);
+    } catch (\PDOException $e2) {
+        http_response_code(500);
+        echo json_encode([
+            "status" => "error",
+            "success" => false,
+            "message" => "Database error: " . $e2->getMessage(),
+            "data" => null
+        ], JSON_UNESCAPED_SLASHES);
+        exit;
+    }
 }
 
 function ensureVitalSyncCloudSyncSchema(PDO $pdo): void {
