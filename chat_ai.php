@@ -5,6 +5,8 @@ header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Tunnel-Skip
 header("Access-Control-Allow-Methods: POST, OPTIONS");
 header("Content-Type: application/json; charset=utf-8");
 
+date_default_timezone_set("Asia/Kolkata");
+
 if ($_SERVER["REQUEST_METHOD"] === "OPTIONS") {
     http_response_code(200);
     exit();
@@ -31,19 +33,27 @@ if (!is_array($input) || empty($input)) {
     $input = $_POST;
 }
 
-// Extract user_id from incoming JSON / POST
+// Extract user_id or email from incoming JSON / POST / Authorization header
 $userId = intval($input["user_id"] ?? $input["userId"] ?? 0);
-if ($userId <= 0) {
-    if (session_status() === PHP_SESSION_NONE) {
-        @session_start();
+$userEmail = strtolower(trim((string)($input["email"] ?? $_GET["email"] ?? $_POST["email"] ?? "")));
+if ($userId <= 0 && $userEmail === "") {
+    $authHeader = $_SERVER["HTTP_AUTHORIZATION"] ?? $_SERVER["REDIRECT_HTTP_AUTHORIZATION"] ?? "";
+    if ($authHeader === "" && function_exists("getallheaders")) {
+        $hdrs = getallheaders();
+        $authHeader = $hdrs["Authorization"] ?? $hdrs["authorization"] ?? "";
     }
-    $userId = intval($_SESSION["user_id"] ?? $_SESSION["id"] ?? 0);
-}
-if ($userId <= 0) {
-    $userId = 1;
+    if (preg_match('/Bearer\s+(\S+)/i', $authHeader, $matches)) {
+        $token = trim($matches[1]);
+        if (is_numeric($token)) {
+            $userId = intval($token);
+        } elseif (filter_var($token, FILTER_VALIDATE_EMAIL)) {
+            $userEmail = strtolower($token);
+        }
+    }
 }
 
 $userMessage = trim((string)($input["message"] ?? $input["message_text"] ?? $input["prompt"] ?? ""));
+$requestedSessionId = intval($input["session_id"] ?? $input["sessionId"] ?? $_GET["session_id"] ?? 0);
 
 if (empty($userMessage)) {
     http_response_code(400);
@@ -54,8 +64,9 @@ if (empty($userMessage)) {
     exit();
 }
 
-// Connect to MySQL using db_connect.php
+// Connect to MySQL using db_connect.php (also initializes ai_chat_sessions / session_id schema)
 require_once __DIR__ . "/db_connect.php";
+require_once __DIR__ . "/ai/ai_service.php";
 
 if ($conn->connect_error) {
     http_response_code(500);
@@ -68,9 +79,34 @@ if ($conn->connect_error) {
 
 $conn->set_charset("utf8mb4");
 
-$latestHeartRate = null;
-$latestSpo2 = null;
-$todayHydrationMl = 0;
+// Resolve verified user_id in database
+if ($userId <= 0 && $userEmail !== "") {
+    $euStmt = $conn->prepare("SELECT id FROM users WHERE email = ? LIMIT 1");
+    if ($euStmt) {
+        $euStmt->bind_param("s", $userEmail);
+        $euStmt->execute();
+        $euRes = $euStmt->get_result()->fetch_assoc();
+        $euStmt->close();
+        if ($euRes) {
+            $userId = intval($euRes["id"]);
+        }
+    }
+}
+if ($userId <= 0) {
+    if (session_status() === PHP_SESSION_NONE) {
+        @session_start();
+    }
+    $userId = intval($_SESSION["user_id"] ?? $_SESSION["id"] ?? 0);
+}
+if ($userId <= 0) {
+    $firstU = $conn->query("SELECT id FROM users ORDER BY id ASC LIMIT 1");
+    if ($firstU && ($firstRow = $firstU->fetch_assoc())) {
+        $userId = intval($firstRow["id"]);
+    }
+}
+if ($userId <= 0) {
+    $userId = 1;
+}
 
 $latestHeartRate = null;
 $latestSpo2 = null;
@@ -154,148 +190,277 @@ if (isset($conn) && ($conn instanceof mysqli)) {
 }
 
 // Format system prompt establishing the persona
-$systemPrompt = "You are VitalSync Jr. Doctor, an empathetic and concise AI wellness assistant. Provide actionable, concise health guidance in 2-3 sentences based ONLY on available real vitals (never invent biometrics if none were recorded today).";
+$systemPrompt = "You are VitalSync AI, an authentic, supportive health and wellness assistant. Answer the user's question directly, concisely, and practically. Use the user's health metrics only when directly relevant to their question.";
 
-$telemetryContext = [];
-if ($latestHeartRate !== null) {
-    $telemetryContext[] = "Today's Heart Rate: {$latestHeartRate} bpm";
-}
-if ($latestSpo2 !== null) {
-    $telemetryContext[] = "Today's SpO2: {$latestSpo2}%";
-}
-$hydPct = ($targetHydrationMl > 0) ? (($todayHydrationMl / $targetHydrationMl) * 100.0) : 0.0;
-$hydRemMl = max(0, $targetHydrationMl - $todayHydrationMl);
-if ($hydPct < 40.0) {
-    $hydStatusNote = "Water intake is critically low ({$todayHydrationMl} / {$targetHydrationMl} ml, {$hydRemMl} ml remaining). Dehydration can lead to acute mental fatigue, headaches, decreased muscle recovery, and sluggish metabolism. Drink 1–2 glasses immediately to restore fluid balance.";
-} elseif ($hydPct < 75.0) {
-    $hydStatusNote = "Intake is lagging behind your daily goal ({$todayHydrationMl} / {$targetHydrationMl} ml, {$hydRemMl} ml remaining). Insufficient hydration can trigger false hunger cues, reduce physical endurance, and elevate resting heart rate. Try keeping a water bottle nearby to sip consistently.";
-} elseif ($hydPct < 100.0) {
-    $hydStatusNote = "You're close to your hydration target ({$todayHydrationMl} / {$targetHydrationMl} ml)! Just {$hydRemMl} ml remaining to ensure optimal electrolyte balance and physical performance.";
-} else {
-    $hydStatusNote = "Daily hydration goal achieved ({$todayHydrationMl} / {$targetHydrationMl} ml)! Optimal fluid balance supports muscle recovery and cognitive clarity. Maintain steady intake if working out.";
-}
-$telemetryContext[] = "Today's Water Intake: {$todayHydrationMl} / {$targetHydrationMl} mL — {$hydStatusNote}";
+$isMetricQuery = preg_match(
+    '/\b(my metrics|my stats|my vitals|my data|today\'?s|water|hydration|drink|fluid|steps|walk|heart rate|bpm|pulse|spo2|oxygen|sleep|progress|summary|overview|status|readiness)\b/i',
+    $userMessage
+) === 1;
 
-if (!empty($telemetryContext)) {
-    $systemPrompt .= "\nPatient Telemetry: " . implode(", ", $telemetryContext) . ".";
+if ($isMetricQuery) {
+    $telemetryContext = [];
+    if ($latestHeartRate !== null) {
+        $telemetryContext[] = "Today's Heart Rate: {$latestHeartRate} bpm";
+    }
+    if ($latestSpo2 !== null) {
+        $telemetryContext[] = "Today's SpO2: {$latestSpo2}%";
+    }
+    $telemetryContext[] = "Today's Water Intake: {$todayHydrationMl} / {$targetHydrationMl} ml";
+
+    if (!empty($telemetryContext)) {
+        $systemPrompt .= "\nUser's today metrics (reference only when relevant): " . implode("; ", $telemetryContext) . ".";
+    }
+}
+
+$sessionId = $requestedSessionId;
+$sessionTitle = "New Chat";
+$timeText = date("h:i A");
+$userMsgId = 0;
+$aiMsgId = 0;
+
+if (isset($conn) && ($conn instanceof mysqli)) {
+    try {
+        if ($sessionId > 0) {
+            $tStmt = $conn->prepare("SELECT title FROM ai_chat_sessions WHERE id = ? AND user_id = ? LIMIT 1");
+            if ($tStmt) {
+                $tStmt->bind_param("ii", $sessionId, $userId);
+                $tStmt->execute();
+                $tRes = $tStmt->get_result()->fetch_assoc();
+                $tStmt->close();
+                if ($tRes) {
+                    $sessionTitle = $tRes["title"] ?: "New Chat";
+                } else {
+                    $sessionId = 0;
+                }
+            }
+        }
+
+        if ($sessionId <= 0) {
+            $words = preg_split('/\s+/', $userMessage);
+            $sessionTitle = ucfirst(implode(' ', array_slice($words, 0, 5)));
+            if (count($words) > 5) $sessionTitle .= "...";
+            if (mb_strlen($sessionTitle) > 60) $sessionTitle = mb_substr($sessionTitle, 0, 57) . "...";
+            if ($sessionTitle === "") $sessionTitle = "New Chat";
+
+            $nsStmt = $conn->prepare("INSERT INTO ai_chat_sessions (user_id, title) VALUES (?, ?)");
+            if ($nsStmt) {
+                $nsStmt->bind_param("is", $userId, $sessionTitle);
+                $nsStmt->execute();
+                $sessionId = (int)$nsStmt->insert_id;
+                $nsStmt->close();
+            }
+        } else {
+            $upStmt = $conn->prepare("UPDATE ai_chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?");
+            if ($upStmt) {
+                $upStmt->bind_param("ii", $sessionId, $userId);
+                $upStmt->execute();
+                $upStmt->close();
+            }
+        }
+    } catch (Throwable $e) {
+        error_log("Chat session setup warning: " . $e->getMessage());
+    }
+}
+
+$priorHistory = (isset($conn) && ($conn instanceof mysqli) && $sessionId > 0)
+    ? loadConversationHistory($conn, $userId, 4, $sessionId)
+    : [];
+
+// Save user message immediately so no conversation is ever lost
+if (isset($conn) && ($conn instanceof mysqli)) {
+    try {
+        $sessParam = $sessionId > 0 ? $sessionId : null;
+        $s1 = $conn->prepare("INSERT INTO ai_chat_messages (user_id, session_id, sender, message, message_text, time_text) VALUES (?, ?, 'user', ?, ?, ?)");
+        if ($s1) {
+            $s1->bind_param("iisss", $userId, $sessParam, $userMessage, $userMessage, $timeText);
+            $s1->execute();
+            $userMsgId = (int)$s1->insert_id;
+            $s1->close();
+        }
+    } catch (Throwable $e) {
+        error_log("User message persistence warning: " . $e->getMessage());
+    }
+}
+
+// Build message list with prior session context (exclude legacy canned greeting turns)
+$ollamaMessages = [
+    [
+        "role" => "system",
+        "content" => $systemPrompt
+    ]
+];
+foreach ($priorHistory as $h) {
+    $priorContent = trim((string)($h["content"] ?? ""));
+    if ($priorContent === "") {
+        continue;
+    }
+    if ($h["role"] === "assistant" && stripos($priorContent, "I'm tracking your activity:") !== false) {
+        continue;
+    }
+    $ollamaMessages[] = [
+        "role" => $h["role"],
+        "content" => $priorContent
+    ];
+}
+$ollamaMessages[] = [
+    "role" => "user",
+    "content" => $userMessage
+];
+
+/**
+ * Dispatches an HTTP POST JSON request to the local Ollama server via cURL,
+ * falling back to native PHP HTTP streams when php_curl is unavailable in Apache.
+ */
+function dispatchOllamaChatRequest(string $url, array $payload, int $timeoutSeconds = 13): array {
+    $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+    if ($jsonPayload === false) {
+        return ["ok" => false, "http_code" => 0, "data" => null, "error" => "JSON encode failed: " . json_last_error_msg()];
+    }
+
+    $execRes = false;
+    $httpCode = 0;
+    $transportError = "";
+
+    if (function_exists("curl_init")) {
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $jsonPayload);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            "Content-Type: application/json; charset=utf-8"
+        ]);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 3);
+        curl_setopt($ch, CURLOPT_TIMEOUT, $timeoutSeconds);
+
+        $execRes = curl_exec($ch);
+        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $transportError = curl_error($ch);
+        curl_close($ch);
+    } elseif (filter_var(ini_get("allow_url_fopen"), FILTER_VALIDATE_BOOLEAN) || ini_get("allow_url_fopen") == "1") {
+        $context = stream_context_create([
+            "http" => [
+                "method" => "POST",
+                "header" => "Content-Type: application/json; charset=utf-8\r\nContent-Length: " . strlen($jsonPayload) . "\r\nConnection: close\r\n",
+                "content" => $jsonPayload,
+                "timeout" => (float)$timeoutSeconds,
+                "ignore_errors" => true
+            ]
+        ]);
+        $execRes = @file_get_contents($url, false, $context);
+        if (isset($http_response_header) && is_array($http_response_header) && isset($http_response_header[0])) {
+            if (preg_match('/HTTP\/\S+\s+(\d{3})/', $http_response_header[0], $m)) {
+                $httpCode = (int)$m[1];
+            }
+        }
+        if ($execRes === false) {
+            $lastErr = error_get_last();
+            $transportError = $lastErr["message"] ?? "HTTP stream request to Ollama failed";
+        }
+    } else {
+        return ["ok" => false, "http_code" => 0, "data" => null, "error" => "Neither cURL nor allow_url_fopen is available"];
+    }
+
+    if ($execRes === false || $httpCode !== 200) {
+        return [
+            "ok" => false,
+            "http_code" => $httpCode,
+            "data" => null,
+            "error" => $transportError !== "" ? $transportError : "Ollama returned HTTP {$httpCode}"
+        ];
+    }
+
+    $decoded = json_decode((string)$execRes, true);
+    if (!is_array($decoded)) {
+        return ["ok" => false, "http_code" => $httpCode, "data" => null, "error" => "Invalid JSON response from Ollama"];
+    }
+
+    return ["ok" => true, "http_code" => $httpCode, "data" => $decoded, "error" => ""];
 }
 
 // Ollama payload configuration
 $ollamaUrl = "http://127.0.0.1:11434/api/chat";
 $ollamaPayload = [
     "model" => "qwen2.5:1.5b",
-    "messages" => [
-        [
-            "role" => "system",
-            "content" => $systemPrompt
-        ],
-        [
-            "role" => "user",
-            "content" => $userMessage
-        ]
-    ],
+    "messages" => $ollamaMessages,
     "stream" => false,
+    "keep_alive" => "15m",
     "options" => [
         "temperature" => 0.4,
-        "num_predict" => 180
+        "num_predict" => 260
     ]
 ];
 
-$jsonPayload = json_encode($ollamaPayload, JSON_UNESCAPED_UNICODE);
-$response = false;
+$ollamaResult = dispatchOllamaChatRequest($ollamaUrl, $ollamaPayload, 13);
+$ollamaData = $ollamaResult["data"];
+$reply = $ollamaResult["ok"]
+    ? ($ollamaData["message"]["content"] ?? $ollamaData["response"] ?? null)
+    : null;
+$modelUsed = "qwen2.5:1.5b";
 
-// Dispatch cURL POST request to local Ollama server with strict timeout & HTTP stream fallback
-if (function_exists("curl_init")) {
-    $ch = curl_init($ollamaUrl);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_POST, true);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, $jsonPayload);
-    curl_setopt($ch, CURLOPT_HTTPHEADER, [
-        "Content-Type: application/json; charset=utf-8"
-    ]);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 3);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-
-    $execRes = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-
-    if ($execRes !== false && $httpCode === 200) {
-        $response = $execRes;
-    }
-}
-
-// Resilient fallback using fast socket reachability check + PHP stream context
-if ($response === false) {
-    $errno = 0;
-    $errstr = "";
-    $sock = @fsockopen("127.0.0.1", 11434, $errno, $errstr, 3);
-    if ($sock) {
-        fclose($sock);
-        $opts = [
-            "http" => [
-                "method" => "POST",
-                "header" => "Content-Type: application/json; charset=utf-8\r\n",
-                "content" => $jsonPayload,
-                "timeout" => 10,
-                "ignore_errors" => true
-            ]
-        ];
-        $context = stream_context_create($opts);
-        $response = @file_get_contents($ollamaUrl, false, $context);
-    }
-}
-
-if ($response === false || empty($response)) {
-    error_log("Ollama connection failed: server unreachable at " . $ollamaUrl);
-    http_response_code(503);
+if (empty($reply) || trim((string)$reply) === "") {
+    error_log("VitalSync chat_ai Ollama error: " . ($ollamaResult["error"] ?: "Empty response payload"));
+    $errMsg = "VitalSync AI engine is currently unreachable. Please verify Ollama is running.";
+    http_response_code(200);
     echo json_encode([
         "success" => false,
-        "message" => "Local AI engine is offline. Ensure Ollama is running."
+        "status" => "error",
+        "message" => $errMsg,
+        "reply" => $errMsg,
+        "session_id" => $sessionId > 0 ? $sessionId : null,
+        "session_title" => $sessionTitle
     ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     exit();
 }
 
-$ollamaData = json_decode($response, true);
-$reply = $ollamaData["message"]["content"] ?? null;
+$cleanReply = trim(str_replace(["\r\n", "\r"], "\n", (string)$reply));
+$cleanReply = preg_replace('/\n{3,}/', "\n\n", $cleanReply);
 
-if (empty($reply)) {
-    http_response_code(500);
-    echo json_encode([
-        "success" => false,
-        "message" => "Empty or invalid response from AI engine."
-    ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-    exit();
-}
-
-$cleanReply = trim($reply);
-
-// Persist conversation by inserting two rows into ai_chat_messages (one for user, one for ai)
+// Persist AI response linked to the same session_id
 if (isset($conn) && ($conn instanceof mysqli)) {
     try {
-        // 1. Insert user message
-        $s1 = $conn->prepare("INSERT INTO ai_chat_messages (user_id, sender, message) VALUES (?, 'user', ?)");
-        if ($s1) {
-            $s1->bind_param("is", $userId, $userMessage);
-            $s1->execute();
-            $s1->close();
-        }
-
-        // 2. Insert AI response
-        $s2 = $conn->prepare("INSERT INTO ai_chat_messages (user_id, sender, message) VALUES (?, 'ai', ?)");
+        $sessParam = $sessionId > 0 ? $sessionId : null;
+        $s2 = $conn->prepare("INSERT INTO ai_chat_messages (user_id, session_id, sender, message, message_text, time_text, model_used) VALUES (?, ?, 'ai', ?, ?, ?, ?)");
         if ($s2) {
-            $s2->bind_param("is", $userId, $cleanReply);
+            $s2->bind_param("iissss", $userId, $sessParam, $cleanReply, $cleanReply, $timeText, $modelUsed);
             $s2->execute();
+            $aiMsgId = (int)$s2->insert_id;
             $s2->close();
         }
+        if ($sessionId > 0) {
+            $tsStmt = $conn->prepare("UPDATE ai_chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?");
+            if ($tsStmt) {
+                $tsStmt->bind_param("ii", $sessionId, $userId);
+                $tsStmt->execute();
+                $tsStmt->close();
+            }
+        }
     } catch (Throwable $e) {
-        error_log("Chat persistence warning: " . $e->getMessage());
+        error_log("AI message persistence warning: " . $e->getMessage());
     }
 }
 
-// Return successful JSON response
+// Return successful JSON response with session linkage
 http_response_code(200);
 echo json_encode([
     "success" => true,
-    "reply" => $cleanReply
+    "status" => "success",
+    "message" => $cleanReply,
+    "reply" => $cleanReply,
+    "session_id" => $sessionId > 0 ? $sessionId : null,
+    "session_title" => $sessionTitle,
+    "user_message" => [
+        "id" => (string)$userMsgId,
+        "sessionId" => $sessionId > 0 ? $sessionId : null,
+        "sender" => "USER",
+        "text" => $userMessage,
+        "timeText" => $timeText
+    ],
+    "ai_response" => [
+        "id" => (string)$aiMsgId,
+        "sessionId" => $sessionId > 0 ? $sessionId : null,
+        "sender" => "AI",
+        "text" => $cleanReply,
+        "timeText" => $timeText,
+        "model_used" => $modelUsed
+    ]
 ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);

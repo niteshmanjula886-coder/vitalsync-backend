@@ -380,7 +380,7 @@ function isUserPersonalHealthQuery($query) {
 function loadConversationHistory($conn, $userId, $limit = 6, $sessionId = null) {
     if ($sessionId !== null && (int)$sessionId > 0) {
         $stmt = $conn->prepare(
-            "SELECT sender, message_text 
+            "SELECT sender, COALESCE(NULLIF(message_text, ''), message) AS msg_content 
              FROM ai_chat_messages 
              WHERE user_id = ? AND session_id = ? 
              ORDER BY id DESC LIMIT ?"
@@ -389,20 +389,25 @@ function loadConversationHistory($conn, $userId, $limit = 6, $sessionId = null) 
         $stmt->bind_param("iii", $userId, $sId, $limit);
     } else {
         $stmt = $conn->prepare(
-            "SELECT sender, message_text 
+            "SELECT sender, COALESCE(NULLIF(message_text, ''), message) AS msg_content 
              FROM ai_chat_messages 
              WHERE user_id = ? 
              ORDER BY id DESC LIMIT ?"
         );
         $stmt->bind_param("ii", $userId, $limit);
     }
+    if (!$stmt) {
+        return [];
+    }
     $stmt->execute();
     $res = $stmt->get_result();
     $rows = [];
     while ($r = $res->fetch_assoc()) {
+        $content = trim((string)($r["msg_content"] ?? ""));
+        if ($content === "") continue;
         $rows[] = [
-            "role" => ($r["sender"] === "USER") ? "user" : "assistant",
-            "content" => $r["message_text"]
+            "role" => (strcasecmp(trim((string)$r["sender"]), "user") === 0) ? "user" : "assistant",
+            "content" => $content
         ];
     }
     $stmt->close();

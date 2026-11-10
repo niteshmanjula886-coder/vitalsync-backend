@@ -17,12 +17,37 @@ if (isset($conn) && ($conn instanceof mysqli)) {
 }
 
 $userId = 0;
+$sessionId = isset($_GET["session_id"]) && is_numeric($_GET["session_id"]) ? intval($_GET["session_id"]) : 0;
+
+// 0. Check Authorization Bearer header
+$authHeader = $_SERVER["HTTP_AUTHORIZATION"] ?? $_SERVER["REDIRECT_HTTP_AUTHORIZATION"] ?? "";
+if ($authHeader === "" && function_exists("getallheaders")) {
+    $hdrs = getallheaders();
+    $authHeader = $hdrs["Authorization"] ?? $hdrs["authorization"] ?? "";
+}
+if (preg_match('/Bearer\s+(\S+)/i', $authHeader, $matches)) {
+    $token = trim($matches[1]);
+    if (is_numeric($token)) {
+        $userId = intval($token);
+    } elseif (filter_var($token, FILTER_VALIDATE_EMAIL) && isset($conn) && ($conn instanceof mysqli)) {
+        $bStmt = $conn->prepare("SELECT id FROM users WHERE email = ? LIMIT 1");
+        if ($bStmt) {
+            $bStmt->bind_param("s", $token);
+            $bStmt->execute();
+            $bRes = $bStmt->get_result()->fetch_assoc();
+            $bStmt->close();
+            if ($bRes) $userId = intval($bRes["id"]);
+        }
+    }
+}
 
 // 1. Check GET query params
-if (isset($_GET["user_id"]) && is_numeric($_GET["user_id"])) {
-    $userId = intval($_GET["user_id"]);
-} elseif (isset($_GET["userId"]) && is_numeric($_GET["userId"])) {
-    $userId = intval($_GET["userId"]);
+if ($userId <= 0) {
+    if (isset($_GET["user_id"]) && is_numeric($_GET["user_id"])) {
+        $userId = intval($_GET["user_id"]);
+    } elseif (isset($_GET["userId"]) && is_numeric($_GET["userId"])) {
+        $userId = intval($_GET["userId"]);
+    }
 }
 
 // 2. Check JSON / POST body
@@ -35,6 +60,9 @@ if ($userId <= 0) {
     $data = !empty($rawInput) ? json_decode($rawInput, true) : null;
     if (is_array($data)) {
         $userId = intval($data["user_id"] ?? $data["userId"] ?? 0);
+        if ($sessionId <= 0) {
+            $sessionId = intval($data["session_id"] ?? $data["sessionId"] ?? 0);
+        }
     } elseif (!empty($_POST["user_id"])) {
         $userId = intval($_POST["user_id"]);
     }
@@ -58,7 +86,7 @@ if ($userId <= 0) {
 // 4. Default fallback to 1 so queries never drop
 if ($userId <= 0) {
     if (isset($conn) && ($conn instanceof mysqli)) {
-        $uCheck = $conn->query("SELECT id FROM users LIMIT 1");
+        $uCheck = $conn->query("SELECT id FROM users ORDER BY id ASC LIMIT 1");
         if ($uCheck && $row = $uCheck->fetch_assoc()) {
             $userId = intval($row["id"]);
         }
@@ -69,17 +97,40 @@ if ($userId <= 0) {
 }
 
 $messages = [];
+$sessionTitle = "New Chat";
 
 if (isset($conn) && ($conn instanceof mysqli)) {
     try {
-        $stmt = $conn->prepare(
-            "SELECT id, sender, message, created_at 
-             FROM ai_chat_messages 
-             WHERE user_id = ? 
-             ORDER BY created_at ASC, id ASC"
-        );
+        if ($sessionId > 0) {
+            $stStmt = $conn->prepare("SELECT title FROM ai_chat_sessions WHERE id = ? AND user_id = ? LIMIT 1");
+            if ($stStmt) {
+                $stStmt->bind_param("ii", $sessionId, $userId);
+                $stStmt->execute();
+                $stRes = $stStmt->get_result()->fetch_assoc();
+                $stStmt->close();
+                if ($stRes) $sessionTitle = $stRes["title"] ?: "New Chat";
+            }
+            $stmt = $conn->prepare(
+                "SELECT id, session_id, sender, COALESCE(NULLIF(message_text, ''), message) AS msg_content, time_text, created_at 
+                 FROM ai_chat_messages 
+                 WHERE user_id = ? AND session_id = ? 
+                 ORDER BY created_at ASC, id ASC"
+            );
+            if ($stmt) {
+                $stmt->bind_param("ii", $userId, $sessionId);
+            }
+        } else {
+            $stmt = $conn->prepare(
+                "SELECT id, session_id, sender, COALESCE(NULLIF(message_text, ''), message) AS msg_content, time_text, created_at 
+                 FROM ai_chat_messages 
+                 WHERE user_id = ? 
+                 ORDER BY created_at ASC, id ASC"
+            );
+            if ($stmt) {
+                $stmt->bind_param("i", $userId);
+            }
+        }
         if ($stmt) {
-            $stmt->bind_param("i", $userId);
             $stmt->execute();
             $result = $stmt->get_result();
             while ($row = $result->fetch_assoc()) {
@@ -89,8 +140,10 @@ if (isset($conn) && ($conn instanceof mysqli)) {
                 }
                 $messages[] = [
                     "id" => (int)$row["id"],
+                    "session_id" => $row["session_id"] !== null ? (int)$row["session_id"] : null,
                     "sender" => $sender,
-                    "message" => (string)$row["message"],
+                    "message" => (string)($row["msg_content"] ?? ""),
+                    "time_text" => (string)($row["time_text"] ?? ""),
                     "created_at" => (string)$row["created_at"]
                 ];
             }
@@ -104,5 +157,7 @@ if (isset($conn) && ($conn instanceof mysqli)) {
 http_response_code(200);
 echo json_encode([
     "success" => true,
+    "session_id" => $sessionId > 0 ? $sessionId : null,
+    "session_title" => $sessionTitle,
     "messages" => $messages
 ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);

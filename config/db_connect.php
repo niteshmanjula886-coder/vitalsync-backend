@@ -237,6 +237,27 @@ function ensureVitalSyncCloudSyncSchema(PDO $pdo): void {
             $pdo->exec("ALTER TABLE `workout_sessions` ADD INDEX `idx_user_workout` (`user_id`, `start_time`)");
         }
     } catch (\Exception $e) {}
+
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `ai_chat_sessions` (
+            `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            `user_id` INT UNSIGNED NOT NULL,
+            `title` VARCHAR(120) NOT NULL DEFAULT 'New Chat',
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            INDEX `idx_ai_sessions_user` (`user_id`, `updated_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    } catch (\Exception $e) {}
+
+    try {
+        $chkChatTbl = $pdo->query("SHOW TABLES LIKE 'ai_chat_messages'")->fetch();
+        if ($chkChatTbl) {
+            $chkSessCol = $pdo->query("SHOW COLUMNS FROM `ai_chat_messages` LIKE 'session_id'")->fetch();
+            if (!$chkSessCol) {
+                $pdo->exec("ALTER TABLE `ai_chat_messages` ADD COLUMN `session_id` BIGINT UNSIGNED DEFAULT NULL AFTER `user_id`, ADD INDEX `idx_ai_chat_session` (`user_id`, `session_id`, `created_at`)");
+            }
+        }
+    } catch (\Exception $e) {}
 }
 
 function sendResponse($status, $message, $data = null, $httpCode = 200, $extra = []) {

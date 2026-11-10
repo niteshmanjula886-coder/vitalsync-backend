@@ -167,6 +167,23 @@ function initVitalSyncMasterSchema(mysqli $conn): void {
         @$conn->query("ALTER TABLE `workout_sessions` ADD COLUMN `session_uuid` VARCHAR(64) NULL AFTER `user_id`, ADD COLUMN `activity_type` VARCHAR(50) NULL AFTER `session_uuid`, ADD COLUMN `start_time` DATETIME NULL AFTER `activity_type`, ADD COLUMN `end_time` DATETIME NULL AFTER `start_time`, ADD COLUMN `duration_seconds` INT NULL DEFAULT 0 AFTER `end_time`, ADD COLUMN `distance_meters` DECIMAL(8,2) DEFAULT 0.00 AFTER `duration_seconds`, ADD COLUMN `steps` INT DEFAULT 0 AFTER `distance_meters`, ADD COLUMN `calories` INT DEFAULT 0 AFTER `steps`, ADD COLUMN `avg_heart_rate` INT DEFAULT NULL AFTER `calories`");
         @$conn->query("ALTER TABLE `workout_sessions` ADD INDEX `idx_user_workout` (`user_id`, `start_time`)");
     }
+
+    // 8. ai_chat_sessions & session_id linkage on ai_chat_messages
+    @$conn->query("CREATE TABLE IF NOT EXISTS `ai_chat_sessions` (
+        `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        `user_id` INT UNSIGNED NOT NULL,
+        `title` VARCHAR(120) NOT NULL DEFAULT 'New Chat',
+        `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX `idx_ai_sessions_user` (`user_id`, `updated_at`),
+        CONSTRAINT `fk_ai_sessions_user` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    $chkChatSess = $conn->query("SHOW COLUMNS FROM `ai_chat_messages` LIKE 'session_id'");
+    if ($chkChatSess && $chkChatSess->num_rows === 0) {
+        @$conn->query("ALTER TABLE `ai_chat_messages` ADD COLUMN `session_id` BIGINT UNSIGNED DEFAULT NULL AFTER `user_id`, ADD INDEX `idx_ai_chat_session` (`user_id`, `session_id`, `created_at`)");
+    }
+    @$conn->query("ALTER TABLE `ai_chat_messages` MODIFY COLUMN `message` TEXT NULL");
 }
 
 try {

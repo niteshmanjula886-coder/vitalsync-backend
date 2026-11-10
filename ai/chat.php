@@ -27,7 +27,7 @@ if ($method === "GET") {
         }
 
         $stmt = $conn->prepare(
-            "SELECT id, session_id, sender, message_text, time_text, model_used, created_at 
+            "SELECT id, session_id, sender, COALESCE(NULLIF(message_text, ''), message) AS msg_content, time_text, model_used, created_at 
              FROM ai_chat_messages 
              WHERE user_id = ? AND session_id = ? 
              ORDER BY id ASC LIMIT 100"
@@ -45,7 +45,7 @@ if ($method === "GET") {
             $sessionId = (int)$lsRes["id"];
             $sessionTitle = $lsRes["title"];
             $stmt = $conn->prepare(
-                "SELECT id, session_id, sender, message_text, time_text, model_used, created_at 
+                "SELECT id, session_id, sender, COALESCE(NULLIF(message_text, ''), message) AS msg_content, time_text, model_used, created_at 
                  FROM ai_chat_messages 
                  WHERE user_id = ? AND session_id = ? 
                  ORDER BY id ASC LIMIT 100"
@@ -54,7 +54,7 @@ if ($method === "GET") {
         } else {
             // No sessions at all
             $stmt = $conn->prepare(
-                "SELECT id, session_id, sender, message_text, time_text, model_used, created_at 
+                "SELECT id, session_id, sender, COALESCE(NULLIF(message_text, ''), message) AS msg_content, time_text, model_used, created_at 
                  FROM ai_chat_messages 
                  WHERE user_id = ? 
                  ORDER BY id ASC LIMIT 100"
@@ -68,11 +68,12 @@ if ($method === "GET") {
 
     $messages = [];
     while ($r = $result->fetch_assoc()) {
+        $normSender = (strcasecmp(trim((string)$r["sender"]), "user") === 0) ? "USER" : "AI";
         $messages[] = [
             "id" => (string)$r["id"],
             "sessionId" => (int)($r["session_id"] ?? $sessionId),
-            "sender" => $r["sender"],
-            "text" => $r["message_text"],
+            "sender" => $normSender,
+            "text" => (string)($r["msg_content"] ?? ""),
             "timeText" => $r["time_text"] ?: date("h:i A", strtotime($r["created_at"])),
             "modelUsed" => $r["model_used"] ?? "vitalsync:ai-engine"
         ];
@@ -143,9 +144,9 @@ if ($method === "POST") {
     // 2. Load conversation history scoped to this specific session before inserting user message
     $historyMessages = loadConversationHistory($conn, $userId, 4, $sessionId);
 
-    // 3. Save user message
-    $uStmt = $conn->prepare("INSERT INTO ai_chat_messages (user_id, session_id, sender, message_text, time_text) VALUES (?, ?, 'USER', ?, ?)");
-    $uStmt->bind_param("iiss", $userId, $sessionId, $userText, $timeText);
+    // 3. Save user message (populate both message and message_text for cross-schema compatibility)
+    $uStmt = $conn->prepare("INSERT INTO ai_chat_messages (user_id, session_id, sender, message, message_text, time_text) VALUES (?, ?, 'user', ?, ?, ?)");
+    $uStmt->bind_param("iisss", $userId, $sessionId, $userText, $userText, $timeText);
     $uStmt->execute();
     $userMsgId = $uStmt->insert_id;
     $uStmt->close();
@@ -206,8 +207,8 @@ if ($method === "POST") {
             $accumulated = $fallback;
         }
 
-        $aStmt = $conn->prepare("INSERT INTO ai_chat_messages (user_id, session_id, sender, message_text, time_text, model_used) VALUES (?, ?, 'AI', ?, ?, 'vitalsync:ai-engine')");
-        $aStmt->bind_param("iiss", $userId, $sessionId, $accumulated, $timeText);
+        $aStmt = $conn->prepare("INSERT INTO ai_chat_messages (user_id, session_id, sender, message, message_text, time_text, model_used) VALUES (?, ?, 'ai', ?, ?, ?, 'vitalsync:ai-engine')");
+        $aStmt->bind_param("iisss", $userId, $sessionId, $accumulated, $accumulated, $timeText);
         $aStmt->execute();
         $aStmt->close();
         $conn->close();
@@ -228,15 +229,22 @@ if ($method === "POST") {
         $tokensUsed = 0;
     }
 
-    // 9. Save AI Response
+    // 9. Save AI Response & touch session timestamp
     $aStmt = $conn->prepare(
-        "INSERT INTO ai_chat_messages (user_id, session_id, sender, message_text, time_text, model_used, tokens_used) 
-         VALUES (?, ?, 'AI', ?, ?, ?, ?)"
+        "INSERT INTO ai_chat_messages (user_id, session_id, sender, message, message_text, time_text, model_used, tokens_used) 
+         VALUES (?, ?, 'ai', ?, ?, ?, ?, ?)"
     );
-    $aStmt->bind_param("iisssi", $userId, $sessionId, $aiReply, $timeText, $modelUsed, $tokensUsed);
+    $aStmt->bind_param("iissssi", $userId, $sessionId, $aiReply, $aiReply, $timeText, $modelUsed, $tokensUsed);
     $aStmt->execute();
     $aiMsgId = $aStmt->insert_id;
     $aStmt->close();
+
+    $touchStmt = $conn->prepare("UPDATE ai_chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?");
+    if ($touchStmt) {
+        $touchStmt->bind_param("ii", $sessionId, $userId);
+        $touchStmt->execute();
+        $touchStmt->close();
+    }
 
     $conn->close();
 
@@ -247,6 +255,7 @@ if ($method === "POST") {
     respondJson(200, [
         "success" => true,
         "status" => "success",
+        "reply" => $aiReply,
         "session_id" => (int)$sessionId,
         "session_title" => $sessionTitle,
         "user_message" => [
@@ -271,7 +280,12 @@ if ($method === "POST") {
 if ($method === "DELETE") {
     $sessionId = isset($_GET["session_id"]) ? (int)$_GET["session_id"] : 0;
     if ($sessionId > 0) {
-        // Delete specific session (cascade deletes messages)
+        $dmStmt = $conn->prepare("DELETE FROM ai_chat_messages WHERE session_id = ? AND user_id = ?");
+        if ($dmStmt) {
+            $dmStmt->bind_param("ii", $sessionId, $userId);
+            $dmStmt->execute();
+            $dmStmt->close();
+        }
         $dStmt = $conn->prepare("DELETE FROM ai_chat_sessions WHERE id = ? AND user_id = ?");
         $dStmt->bind_param("ii", $sessionId, $userId);
         $dStmt->execute();

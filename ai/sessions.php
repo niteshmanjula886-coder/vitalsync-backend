@@ -33,10 +33,52 @@ if (!$sessionsTableExists) {
 if ($method === "GET") {
     $sessions = [];
     try {
+        // Backfill any un-sessioned legacy messages for this user into a saved session so nothing is lost
+        $orphanCheck = $conn->prepare(
+            "SELECT COUNT(*) AS cnt,
+                    (SELECT COALESCE(NULLIF(m0.message_text, ''), m0.message)
+                     FROM ai_chat_messages m0
+                     WHERE m0.user_id = ? AND (m0.session_id IS NULL OR m0.session_id = 0) AND LOWER(m0.sender) = 'user'
+                     ORDER BY m0.id ASC LIMIT 1) AS first_prompt
+             FROM ai_chat_messages
+             WHERE user_id = ? AND (session_id IS NULL OR session_id = 0)"
+        );
+        if ($orphanCheck) {
+            $orphanCheck->bind_param("ii", $userId, $userId);
+            $orphanCheck->execute();
+            $oRes = $orphanCheck->get_result()->fetch_assoc();
+            $orphanCheck->close();
+            if ($oRes && (int)$oRes["cnt"] > 0) {
+                $rawTitle = trim((string)($oRes["first_prompt"] ?? ""));
+                $legacyTitle = "Previous Conversation";
+                if ($rawTitle !== "") {
+                    $words = preg_split('/\s+/', $rawTitle);
+                    $legacyTitle = ucfirst(implode(' ', array_slice($words, 0, 5)));
+                    if (count($words) > 5) $legacyTitle .= "...";
+                    if (mb_strlen($legacyTitle) > 60) $legacyTitle = mb_substr($legacyTitle, 0, 57) . "...";
+                }
+                $mkSess = $conn->prepare("INSERT INTO ai_chat_sessions (user_id, title) VALUES (?, ?)");
+                if ($mkSess) {
+                    $mkSess->bind_param("is", $userId, $legacyTitle);
+                    $mkSess->execute();
+                    $legacySessId = (int)$mkSess->insert_id;
+                    $mkSess->close();
+                    if ($legacySessId > 0) {
+                        $linkStmt = $conn->prepare("UPDATE ai_chat_messages SET session_id = ? WHERE user_id = ? AND (session_id IS NULL OR session_id = 0)");
+                        if ($linkStmt) {
+                            $linkStmt->bind_param("ii", $legacySessId, $userId);
+                            $linkStmt->execute();
+                            $linkStmt->close();
+                        }
+                    }
+                }
+            }
+        }
+
         $stmt = $conn->prepare(
             "SELECT s.id, s.title, s.created_at, s.updated_at,
                     (SELECT COUNT(*) FROM ai_chat_messages m WHERE m.session_id = s.id) AS message_count,
-                    (SELECT m2.message_text FROM ai_chat_messages m2 WHERE m2.session_id = s.id ORDER BY m2.id DESC LIMIT 1) AS last_message
+                    (SELECT COALESCE(NULLIF(m2.message_text, ''), m2.message) FROM ai_chat_messages m2 WHERE m2.session_id = s.id ORDER BY m2.id DESC LIMIT 1) AS last_message
              FROM ai_chat_sessions s 
              WHERE s.user_id = ? 
              ORDER BY s.updated_at DESC, s.id DESC 
@@ -112,6 +154,13 @@ if ($method === "DELETE") {
             "success" => false,
             "message" => "Valid session_id is required"
         ]);
+    }
+
+    $dmStmt = $conn->prepare("DELETE FROM ai_chat_messages WHERE session_id = ? AND user_id = ?");
+    if ($dmStmt) {
+        $dmStmt->bind_param("ii", $sessionId, $userId);
+        $dmStmt->execute();
+        $dmStmt->close();
     }
 
     $stmt = $conn->prepare("DELETE FROM ai_chat_sessions WHERE id = ? AND user_id = ?");
