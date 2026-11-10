@@ -32,17 +32,27 @@ define("OLLAMA_TIMEOUT_SECONDS", 120);
  * Checks if local Ollama daemon is reachable on port 11434.
  */
 function isOllamaReachable() {
-    $ch = curl_init(OLLAMA_BASE_URL . "/");
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 2,
-        CURLOPT_CONNECTTIMEOUT => 2,
-        CURLOPT_NOBODY => true
-    ]);
-    $res = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-    return ($httpCode >= 200 && $httpCode < 400);
+    if (function_exists("curl_init")) {
+        $ch = curl_init(OLLAMA_BASE_URL . "/");
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 3,
+            CURLOPT_CONNECTTIMEOUT => 3,
+            CURLOPT_NOBODY => true
+        ]);
+        curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        return ($httpCode >= 200 && $httpCode < 400);
+    }
+    $errno = 0;
+    $errstr = "";
+    $sock = @fsockopen("127.0.0.1", 11434, $errno, $errstr, 3);
+    if ($sock) {
+        fclose($sock);
+        return true;
+    }
+    return false;
 }
 
 /**
@@ -80,23 +90,49 @@ function callAiChat(array $messages, $systemPrompt = "") {
         ]
     ]);
 
-    $ch = curl_init(OLLAMA_BASE_URL . "/api/chat");
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_POST => true,
-        CURLOPT_POSTFIELDS => $payload,
-        CURLOPT_HTTPHEADER => [
-            "Content-Type: application/json",
-            "Content-Length: " . strlen($payload)
-        ],
-        CURLOPT_TIMEOUT => 120,
-        CURLOPT_CONNECTTIMEOUT => 15
-    ]);
+    $rawResponse = false;
+    $httpCode = 0;
+    $curlErr = "";
 
-    $rawResponse = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $curlErr = curl_error($ch);
-    curl_close($ch);
+    if (function_exists("curl_init")) {
+        $ch = curl_init(OLLAMA_BASE_URL . "/api/chat");
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => $payload,
+            CURLOPT_HTTPHEADER => [
+                "Content-Type: application/json",
+                "Content-Length: " . strlen($payload)
+            ],
+            CURLOPT_CONNECTTIMEOUT => 3,
+            CURLOPT_TIMEOUT => 10
+        ]);
+
+        $rawResponse = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlErr = curl_error($ch);
+        curl_close($ch);
+    } else {
+        $errno = 0;
+        $errstr = "";
+        $sock = @fsockopen("127.0.0.1", 11434, $errno, $errstr, 3);
+        if ($sock) {
+            fclose($sock);
+            $ctx = stream_context_create([
+                "http" => [
+                    "method" => "POST",
+                    "header" => "Content-Type: application/json\r\n",
+                    "content" => $payload,
+                    "timeout" => 10,
+                    "ignore_errors" => true
+                ]
+            ]);
+            $rawResponse = @file_get_contents(OLLAMA_BASE_URL . "/api/chat", false, $ctx);
+            if ($rawResponse !== false) {
+                $httpCode = 200;
+            }
+        }
+    }
 
     if ($curlErr || $httpCode < 200 || $httpCode >= 300 || empty($rawResponse)) {
         return null;
@@ -173,6 +209,10 @@ function streamAiChat(array $messages, $systemPrompt, callable $chunkCallback) {
         ]
     ]);
 
+    if (!function_exists("curl_init")) {
+        return false;
+    }
+
     $ch = curl_init(OLLAMA_BASE_URL . "/api/chat");
     curl_setopt_array($ch, [
         CURLOPT_POST => true,
@@ -181,8 +221,8 @@ function streamAiChat(array $messages, $systemPrompt, callable $chunkCallback) {
             "Content-Type: application/json",
             "Content-Length: " . strlen($payload)
         ],
-        CURLOPT_TIMEOUT => 120,
-        CURLOPT_CONNECTTIMEOUT => 15,
+        CURLOPT_CONNECTTIMEOUT => 3,
+        CURLOPT_TIMEOUT => 10,
         CURLOPT_WRITEFUNCTION => function($curlHandle, $data) use ($chunkCallback) {
             $lines = explode("\n", $data);
             foreach ($lines as $line) {
@@ -449,25 +489,41 @@ function fetchUserHealthContext($conn, $userId) {
         }
     }
 
-    // 2. Health Goals Targets
+    // 2. Health Goals Targets (sync activity_goals & user_health_goals)
+    $hgUpdatedAt = null;
     try {
-        $gStmt = $conn->prepare("SELECT primary_goal, target_steps, target_water_ml, target_weight_kg FROM user_health_goals WHERE user_id = ? LIMIT 1");
+        $gStmt = $conn->prepare("SELECT primary_goal, target_steps, target_water_ml, target_weight_kg, updated_at FROM user_health_goals WHERE user_id = ? LIMIT 1");
         if ($gStmt) {
             $gStmt->bind_param("i", $userId);
             $gStmt->execute();
             $gRes = $gStmt->get_result()->fetch_assoc();
             $gStmt->close();
             if (!empty($gRes["primary_goal"])) $ctx["primary_goal"] = $gRes["primary_goal"];
-            if (!empty($gRes["target_steps"]) && (int)$gRes["target_steps"] > 0) $ctx["steps_target"] = (int)$gRes["target_steps"];
+            if (!empty($gRes["target_steps"]) && (int)$gRes["target_steps"] > 0) {
+                $ctx["steps_target"] = (int)$gRes["target_steps"];
+                $hgUpdatedAt = $gRes["updated_at"] ?? null;
+            }
             if (!empty($gRes["target_water_ml"]) && (int)$gRes["target_water_ml"] > 0) $ctx["water_target_ml"] = (int)$gRes["target_water_ml"];
+        }
+        $agStmt = $conn->prepare("SELECT daily_step_goal, updated_at FROM activity_goals WHERE user_id = ? LIMIT 1");
+        if ($agStmt) {
+            $agStmt->bind_param("i", $userId);
+            $agStmt->execute();
+            $agRes = $agStmt->get_result()->fetch_assoc();
+            $agStmt->close();
+            if (!empty($agRes["daily_step_goal"]) && (int)$agRes["daily_step_goal"] > 0) {
+                if ($hgUpdatedAt === null || empty($agRes["updated_at"]) || strtotime($agRes["updated_at"]) >= strtotime($hgUpdatedAt)) {
+                    $ctx["steps_target"] = (int)$agRes["daily_step_goal"];
+                }
+            }
         }
     } catch (\Exception $e) {}
 
-    // 3. Live Vitals from DB (Heart Rate, Blood Pressure, SpO2)
+    // 3. Live Vitals from DB logged TODAY (Heart Rate, Blood Pressure, SpO2)
     $vStmt = $conn->prepare(
         "SELECT heart_rate, spo2, systolic_bp, diastolic_bp, logged_at 
          FROM vitals_logs 
-         WHERE user_id = ? 
+         WHERE user_id = ? AND DATE(logged_at) = CURDATE()
          ORDER BY logged_at DESC LIMIT 1"
     );
     if ($vStmt) {
@@ -489,9 +545,9 @@ function fetchUserHealthContext($conn, $userId) {
         }
     }
 
-    // Check vitals_readings table as backup
+    // Check vitals_readings table as backup (TODAY only)
     if ($ctx["hr_current"] === "NOT_RECORDED") {
-        $vrStmt = $conn->prepare("SELECT value_numeric FROM vitals_readings WHERE user_id = ? AND reading_type = 'heart_rate' ORDER BY recorded_at DESC LIMIT 1");
+        $vrStmt = $conn->prepare("SELECT value_numeric FROM vitals_readings WHERE user_id = ? AND reading_type = 'heart_rate' AND DATE(recorded_at) = CURDATE() ORDER BY recorded_at DESC LIMIT 1");
         if ($vrStmt) {
             $vrStmt->bind_param("i", $userId);
             $vrStmt->execute();
@@ -504,7 +560,7 @@ function fetchUserHealthContext($conn, $userId) {
     }
 
     if ($ctx["spo2"] === "NOT_RECORDED") {
-        $vsStmt = $conn->prepare("SELECT value_numeric FROM vitals_readings WHERE user_id = ? AND reading_type = 'spo2' ORDER BY recorded_at DESC LIMIT 1");
+        $vsStmt = $conn->prepare("SELECT value_numeric FROM vitals_readings WHERE user_id = ? AND reading_type = 'spo2' AND DATE(recorded_at) = CURDATE() ORDER BY recorded_at DESC LIMIT 1");
         if ($vsStmt) {
             $vsStmt->bind_param("i", $userId);
             $vsStmt->execute();
@@ -516,8 +572,8 @@ function fetchUserHealthContext($conn, $userId) {
         }
     }
 
-    // Resting Heart Rate Baseline
-    $rStmt = $conn->prepare("SELECT MIN(heart_rate) as resting_hr FROM vitals_logs WHERE user_id = ? AND heart_rate >= 45 AND heart_rate <= 110");
+    // Resting Heart Rate Baseline (TODAY only, no fake defaults)
+    $rStmt = $conn->prepare("SELECT MIN(heart_rate) as resting_hr FROM vitals_logs WHERE user_id = ? AND DATE(logged_at) = CURDATE() AND heart_rate >= 45 AND heart_rate <= 110");
     if ($rStmt) {
         $rStmt->bind_param("i", $userId);
         $rStmt->execute();
@@ -526,7 +582,7 @@ function fetchUserHealthContext($conn, $userId) {
         if ($rRes && (int)$rRes["resting_hr"] > 0) {
             $ctx["hr_resting"] = (int)$rRes["resting_hr"] . " bpm";
         } elseif ($ctx["hr_current"] !== "NOT_RECORDED") {
-            $ctx["hr_resting"] = "68 bpm";
+            $ctx["hr_resting"] = $ctx["hr_current"] . " bpm";
         }
     }
 

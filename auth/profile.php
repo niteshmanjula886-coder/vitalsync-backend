@@ -36,12 +36,12 @@ function buildProfileResponse($user, $userProfile = null) {
         }
     }
 
-    $height = $userProfile["height_cm"] !== null ? (float)$userProfile["height_cm"] : ($user["height"] !== null ? (float)$user["height"] : null);
-    $weight = $userProfile["weight_kg"] !== null ? (float)$userProfile["weight_kg"] : ($user["weight"] !== null ? (float)$user["weight"] : null);
-    $gender = $userProfile["gender"] ?: ($user["gender"] ?: "Not Specified");
-    $phone = $userProfile["phone"] ?: $user["phone"];
+    $height = ($userProfile["height_cm"] ?? null) !== null ? (float)$userProfile["height_cm"] : (($user["height"] ?? null) !== null ? (float)$user["height"] : null);
+    $weight = ($userProfile["weight_kg"] ?? null) !== null ? (float)$userProfile["weight_kg"] : (($user["weight"] ?? null) !== null ? (float)$user["weight"] : null);
+    $gender = ($userProfile["gender"] ?? null) ?: (($user["gender"] ?? null) ?: "Not Specified");
+    $phone = ($userProfile["phone"] ?? null) ?: ($user["phone"] ?? null);
     $bloodGroup = $userProfile["blood_group"] ?? null;
-    $fullName = $userProfile["full_name"] ?: $user["full_name"];
+    $fullName = ($userProfile["full_name"] ?? null) ?: ($user["full_name"] ?? "");
 
     return [
         "id" => (int)$user["id"],
@@ -60,6 +60,7 @@ function buildProfileResponse($user, $userProfile = null) {
         "blood_group" => $bloodGroup,
         "activity_level" => $user["activity_level"],
         "primary_goal" => $user["primary_goal"] ?? "Fitness",
+        "step_goal" => isset($user["step_goal"]) && (int)$user["step_goal"] > 0 ? (int)$user["step_goal"] : null,
         "profile_image" => $user["profile_image"],
         "image_url" => $imageUrl,
         "avatar_url" => $imageUrl,
@@ -180,6 +181,21 @@ if ($method === "GET") {
         $sStmt2->close();
     }
 
+    // Merge latest step_goal from activity_goals & user_health_goals
+    $agGoal = 0;
+    $agStmt = $conn->prepare("SELECT daily_step_goal FROM activity_goals WHERE user_id = ? LIMIT 1");
+    if ($agStmt) {
+        $agStmt->bind_param("i", $userId);
+        $agStmt->execute();
+        $agR = $agStmt->get_result()->fetch_assoc();
+        $agStmt->close();
+        if (!empty($agR["daily_step_goal"]) && (int)$agR["daily_step_goal"] > 0) {
+            $agGoal = (int)$agR["daily_step_goal"];
+        }
+    }
+    $resolvedStepGoal = ($agGoal > 0) ? $agGoal : ((int)($uGoals["target_steps"] ?? 8000) > 0 ? (int)$uGoals["target_steps"] : 8000);
+    $user["step_goal"] = $resolvedStepGoal;
+
     $conn->close();
 
     respond(200, [
@@ -190,7 +206,8 @@ if ($method === "GET") {
         "health_goals" => [
             "user_id" => (int)$uGoals["user_id"],
             "primary_goal" => $uGoals["primary_goal"],
-            "target_steps" => (int)$uGoals["target_steps"],
+            "step_goal" => $resolvedStepGoal,
+            "target_steps" => $resolvedStepGoal,
             "target_sleep_hours" => (float)$uGoals["target_sleep_hours"],
             "target_water_ml" => (int)$uGoals["target_water_ml"],
             "target_weight_kg" => $uGoals["target_weight_kg"] !== null ? (float)$uGoals["target_weight_kg"] : null,
@@ -321,12 +338,62 @@ if ($method === "POST" || $method === "PUT") {
     $pUp->execute();
     $pUp->close();
 
+    // 3. Optional step_goal update across activity_goals, user_health_goals, and users.step_goal (if present)
+    $stepGoalParam = null;
+    if (isset($data["step_goal"]) && is_numeric($data["step_goal"])) {
+        $stepGoalParam = (int)$data["step_goal"];
+    } elseif (isset($data["target_steps"]) && is_numeric($data["target_steps"])) {
+        $stepGoalParam = (int)$data["target_steps"];
+    } elseif (isset($data["daily_step_goal"]) && is_numeric($data["daily_step_goal"])) {
+        $stepGoalParam = (int)$data["daily_step_goal"];
+    }
+    if ($stepGoalParam !== null && $stepGoalParam >= 1000 && $stepGoalParam <= 100000) {
+        $agUp = $conn->prepare("INSERT INTO activity_goals (user_id, daily_step_goal) VALUES (?, ?) ON DUPLICATE KEY UPDATE daily_step_goal = VALUES(daily_step_goal)");
+        if ($agUp) {
+            $agUp->bind_param("ii", $targetUserId, $stepGoalParam);
+            $agUp->execute();
+            $agUp->close();
+        }
+        $hgUp = $conn->prepare("INSERT INTO user_health_goals (user_id, target_steps) VALUES (?, ?) ON DUPLICATE KEY UPDATE target_steps = VALUES(target_steps)");
+        if ($hgUp) {
+            $hgUp->bind_param("ii", $targetUserId, $stepGoalParam);
+            $hgUp->execute();
+            $hgUp->close();
+        }
+        try {
+            $chkSg = $conn->query("SHOW COLUMNS FROM users LIKE 'step_goal'");
+            if ($chkSg && $chkSg->num_rows > 0) {
+                $usUp = $conn->prepare("UPDATE users SET step_goal = ? WHERE id = ?");
+                if ($usUp) {
+                    $usUp->bind_param("ii", $stepGoalParam, $targetUserId);
+                    $usUp->execute();
+                    $usUp->close();
+                }
+            }
+        } catch (\Throwable $e) {}
+    }
+
     // Fetch updated records
     $fetchU = $conn->prepare("SELECT id, full_name, email, phone, dob, age, gender, height, weight, activity_level, primary_goal, profile_image, created_at, updated_at FROM users WHERE id = ? LIMIT 1");
     $fetchU->bind_param("i", $targetUserId);
     $fetchU->execute();
     $updatedUser = $fetchU->get_result()->fetch_assoc();
     $fetchU->close();
+
+    if ($stepGoalParam !== null && $stepGoalParam >= 1000) {
+        $updatedUser["step_goal"] = $stepGoalParam;
+    } else {
+        $agF = $conn->prepare("SELECT daily_step_goal FROM activity_goals WHERE user_id = ? LIMIT 1");
+        if ($agF) {
+            $agF->bind_param("i", $targetUserId);
+            $agF->execute();
+            $agFr = $agF->get_result()->fetch_assoc();
+            $agF->close();
+            if (!empty($agFr["daily_step_goal"]) && (int)$agFr["daily_step_goal"] > 0) {
+                $updatedUser["step_goal"] = (int)$agFr["daily_step_goal"];
+            }
+        }
+    }
 
     $fetchP = $conn->prepare("SELECT user_id, full_name, age, gender, height_cm, weight_kg, blood_group, phone, avatar_url, updated_at FROM user_profiles WHERE user_id = ? LIMIT 1");
     $fetchP->bind_param("i", $targetUserId);
@@ -339,6 +406,7 @@ if ($method === "POST" || $method === "PUT") {
         "success" => true,
         "status" => "success",
         "message" => "Profile updated successfully",
+        "step_goal" => $updatedUser["step_goal"] ?? null,
         "profile" => buildProfileResponse($updatedUser, $updatedProf)
     ]);
 }

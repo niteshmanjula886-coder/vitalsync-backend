@@ -29,6 +29,15 @@ try {
     }
 }
 
+if (!isset($conn) || !($conn instanceof mysqli) || $conn->connect_error) {
+    http_response_code(500);
+    echo json_encode([
+        "success" => false,
+        "message" => "Database connection error"
+    ], JSON_UNESCAPED_SLASHES);
+    exit();
+}
+
 $conn->set_charset("utf8mb4");
 
 // Load PDO and helper functions

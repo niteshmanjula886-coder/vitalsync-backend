@@ -72,8 +72,23 @@ if ($method === "GET") {
     $settings = $stmt->get_result()->fetch_assoc();
     $stmt->close();
 
-    // If no row exists, initialize default row
+    // If no row exists, verify user exists in users before inserting default row
     if (!$settings) {
+        $uChk = $conn->prepare("SELECT id FROM users WHERE id = ? LIMIT 1");
+        $uChk->bind_param("i", $userId);
+        $uChk->execute();
+        $uExists = $uChk->get_result()->fetch_assoc();
+        $uChk->close();
+
+        if (!$uExists) {
+            $conn->close();
+            respond(404, [
+                "success" => false,
+                "status" => "error",
+                "message" => "User not found"
+            ]);
+        }
+
         $initStmt = $conn->prepare("INSERT INTO user_app_settings (user_id) VALUES (?) ON DUPLICATE KEY UPDATE user_id = user_id");
         $initStmt->bind_param("i", $userId);
         $initStmt->execute();

@@ -19,11 +19,20 @@ try {
 
         echo json_encode([
             "success" => false,
-            "status" => "error",
-            "message" => "Database error: " . $e2->getMessage()
+            "message" => "Database connection error"
         ], JSON_UNESCAPED_SLASHES);
-        exit;
+        exit();
     }
+}
+
+if ($conn->connect_error) {
+    http_response_code(500);
+    header("Content-Type: application/json; charset=UTF-8");
+    echo json_encode([
+        "success" => false,
+        "message" => "Database connection error"
+    ], JSON_UNESCAPED_SLASHES);
+    exit();
 }
 
 $conn->set_charset("utf8mb4");
@@ -160,4 +169,8 @@ function initVitalSyncMasterSchema(mysqli $conn): void {
     }
 }
 
-initVitalSyncMasterSchema($conn);
+try {
+    initVitalSyncMasterSchema($conn);
+} catch (\Throwable $e) {
+    error_log("Schema init warning: " . $e->getMessage());
+}

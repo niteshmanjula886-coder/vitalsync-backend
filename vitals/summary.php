@@ -4,54 +4,65 @@ require_once __DIR__ . "/../config/auth_middleware.php";
 
 $userId = resolveUserIdOrDie($conn, true);
 
-// Fetch user profile stats
+// Fetch user profile stats safely
+$userProfile = null;
 $uStmt = $conn->prepare("SELECT height, weight FROM users WHERE id = ? LIMIT 1");
-$uStmt->bind_param("i", $userId);
-$uStmt->execute();
-$userProfile = $uStmt->get_result()->fetch_assoc();
-$uStmt->close();
+if ($uStmt) {
+    $uStmt->bind_param("i", $userId);
+    $uStmt->execute();
+    $userProfile = $uStmt->get_result()->fetch_assoc();
+    $uStmt->close();
+}
 
-$height = ($userProfile && $userProfile["height"] !== null) ? (float)$userProfile["height"] : 0.0;
-$weight = ($userProfile && $userProfile["weight"] !== null) ? (float)$userProfile["weight"] : 0.0;
+$height = ($userProfile && ($userProfile["height"] ?? null) !== null) ? (float)$userProfile["height"] : 0.0;
+$weight = ($userProfile && ($userProfile["weight"] ?? null) !== null) ? (float)$userProfile["weight"] : 0.0;
 $hasValidBmi = ($height > 0 && $weight > 0);
 $bmi = $hasValidBmi ? round($weight / (($height / 100) * ($height / 100)), 1) : 0.0;
 $bmiCategory = $hasValidBmi ? (($bmi < 18.5) ? "Underweight" : (($bmi <= 24.9) ? "Healthy Range" : (($bmi <= 29.9) ? "Overweight" : "Obese"))) : "Not set";
 
 $today = date("Y-m-d");
 
-// 1. Latest Heart Rate (vitals_logs first, fallback to vitals_readings)
+// 1. Today's Latest Heart Rate (vitals_logs first, fallback to vitals_readings — TODAY only)
+$hrRow = null;
 $hrStmt = $conn->prepare(
     "SELECT heart_rate as value_numeric, logged_at as recorded_at 
      FROM vitals_logs 
-     WHERE user_id = ? AND heart_rate > 0 
+     WHERE user_id = ? AND heart_rate > 0 AND DATE(logged_at) = ?
      ORDER BY logged_at DESC LIMIT 1"
 );
-$hrStmt->bind_param("i", $userId);
-$hrStmt->execute();
-$hrRow = $hrStmt->get_result()->fetch_assoc();
-$hrStmt->close();
+if ($hrStmt) {
+    $hrStmt->bind_param("is", $userId, $today);
+    $hrStmt->execute();
+    $hrRow = $hrStmt->get_result()->fetch_assoc();
+    $hrStmt->close();
+}
 
 if (!$hrRow) {
     $hrStmt2 = $conn->prepare(
         "SELECT value_numeric, status_label, recorded_at 
          FROM vitals_readings 
-         WHERE user_id = ? AND reading_type = 'heart_rate' 
+         WHERE user_id = ? AND reading_type = 'heart_rate' AND DATE(recorded_at) = ?
          ORDER BY recorded_at DESC LIMIT 1"
     );
-    $hrStmt2->bind_param("i", $userId);
-    $hrStmt2->execute();
-    $hrRow = $hrStmt2->get_result()->fetch_assoc();
-    $hrStmt2->close();
+    if ($hrStmt2) {
+        $hrStmt2->bind_param("is", $userId, $today);
+        $hrStmt2->execute();
+        $hrRow = $hrStmt2->get_result()->fetch_assoc();
+        $hrStmt2->close();
+    }
 }
 
 if ($hrRow) {
     $curBpm = (int)$hrRow["value_numeric"];
     // Stats for today
+    $stRow = null;
     $stStmt = $conn->prepare("SELECT MIN(heart_rate) as min_bpm, MAX(heart_rate) as max_bpm, AVG(heart_rate) as avg_bpm FROM vitals_logs WHERE user_id = ? AND heart_rate > 0 AND DATE(logged_at) = ?");
-    $stStmt->bind_param("is", $userId, $today);
-    $stStmt->execute();
-    $stRow = $stStmt->get_result()->fetch_assoc();
-    $stStmt->close();
+    if ($stStmt) {
+        $stStmt->bind_param("is", $userId, $today);
+        $stStmt->execute();
+        $stRow = $stStmt->get_result()->fetch_assoc();
+        $stStmt->close();
+    }
 
     $minBpm = ($stRow && $stRow["min_bpm"] !== null) ? (int)$stRow["min_bpm"] : $curBpm;
     $maxBpm = ($stRow && $stRow["max_bpm"] !== null) ? (int)$stRow["max_bpm"] : $curBpm;
@@ -59,7 +70,7 @@ if ($hrRow) {
 
     $heartRate = [
         "bpm" => $curBpm,
-        "status" => ($curBpm < 60) ? "Low Rate" : (($curBpm <= 100) ? "Normal" : "Elevated"),
+        "status" => ($curBpm < 60) ? "Low / Athletic" : (($curBpm <= 100) ? "Normal" : "Elevated"),
         "resting_bpm" => $restingBpm,
         "min_bpm" => $minBpm,
         "max_bpm" => $maxBpm,
@@ -69,7 +80,7 @@ if ($hrRow) {
 } else {
     $heartRate = [
         "bpm" => 0,
-        "status" => "No readings yet",
+        "status" => "No Device Connected",
         "resting_bpm" => 0,
         "min_bpm" => 0,
         "max_bpm" => 0,
@@ -78,29 +89,34 @@ if ($hrRow) {
     ];
 }
 
-// 2. Latest Blood Pressure
+// 2. Today's Latest Blood Pressure
+$bpRow = null;
 $bpStmt = $conn->prepare(
     "SELECT systolic_bp AS systolic, diastolic_bp AS diastolic, logged_at AS recorded_at 
      FROM vitals_logs 
-     WHERE user_id = ? AND systolic_bp > 0 
+     WHERE user_id = ? AND systolic_bp > 0 AND DATE(logged_at) = ?
      ORDER BY logged_at DESC LIMIT 1"
 );
-$bpStmt->bind_param("i", $userId);
-$bpStmt->execute();
-$bpRow = $bpStmt->get_result()->fetch_assoc();
-$bpStmt->close();
+if ($bpStmt) {
+    $bpStmt->bind_param("is", $userId, $today);
+    $bpStmt->execute();
+    $bpRow = $bpStmt->get_result()->fetch_assoc();
+    $bpStmt->close();
+}
 
 if (!$bpRow) {
     $bpStmt2 = $conn->prepare(
         "SELECT value_numeric AS systolic, value_secondary AS diastolic, value_text, status_label, recorded_at 
          FROM vitals_readings 
-         WHERE user_id = ? AND reading_type = 'blood_pressure' 
+         WHERE user_id = ? AND reading_type = 'blood_pressure' AND DATE(recorded_at) = ?
          ORDER BY recorded_at DESC LIMIT 1"
     );
-    $bpStmt2->bind_param("i", $userId);
-    $bpStmt2->execute();
-    $bpRow = $bpStmt2->get_result()->fetch_assoc();
-    $bpStmt2->close();
+    if ($bpStmt2) {
+        $bpStmt2->bind_param("is", $userId, $today);
+        $bpStmt2->execute();
+        $bpRow = $bpStmt2->get_result()->fetch_assoc();
+        $bpStmt2->close();
+    }
 }
 
 if ($bpRow) {
@@ -119,36 +135,41 @@ if ($bpRow) {
     $bloodPressure = [
         "systolic" => 0,
         "diastolic" => 0,
-        "text" => "--/-- mmHg",
-        "status" => "No readings yet",
+        "text" => "--/--",
+        "status" => "No Device Connected",
         "recorded_at" => "",
         "has_data" => false
     ];
 }
 
-// 3. Latest SpO2
+// 3. Today's Latest SpO2
+$spo2Row = null;
 $spo2Stmt = $conn->prepare(
     "SELECT spo2 as value_numeric, logged_at as recorded_at 
      FROM vitals_logs 
-     WHERE user_id = ? AND spo2 > 0 
+     WHERE user_id = ? AND spo2 > 0 AND DATE(logged_at) = ?
      ORDER BY logged_at DESC LIMIT 1"
 );
-$spo2Stmt->bind_param("i", $userId);
-$spo2Stmt->execute();
-$spo2Row = $spo2Stmt->get_result()->fetch_assoc();
-$spo2Stmt->close();
+if ($spo2Stmt) {
+    $spo2Stmt->bind_param("is", $userId, $today);
+    $spo2Stmt->execute();
+    $spo2Row = $spo2Stmt->get_result()->fetch_assoc();
+    $spo2Stmt->close();
+}
 
 if (!$spo2Row) {
     $spo2Stmt2 = $conn->prepare(
         "SELECT value_numeric, status_label, recorded_at 
          FROM vitals_readings 
-         WHERE user_id = ? AND reading_type = 'spo2' 
+         WHERE user_id = ? AND reading_type = 'spo2' AND DATE(recorded_at) = ?
          ORDER BY recorded_at DESC LIMIT 1"
     );
-    $spo2Stmt2->bind_param("i", $userId);
-    $spo2Stmt2->execute();
-    $spo2Row = $spo2Stmt2->get_result()->fetch_assoc();
-    $spo2Stmt2->close();
+    if ($spo2Stmt2) {
+        $spo2Stmt2->bind_param("is", $userId, $today);
+        $spo2Stmt2->execute();
+        $spo2Row = $spo2Stmt2->get_result()->fetch_assoc();
+        $spo2Stmt2->close();
+    }
 }
 
 if ($spo2Row) {
@@ -163,19 +184,41 @@ if ($spo2Row) {
 } else {
     $spo2 = [
         "percentage" => 0,
-        "status" => "No readings yet",
+        "status" => "No Device Connected",
         "recorded_at" => "",
         "has_data" => false
     ];
 }
 
-// 4. Today's Steps & Goal
-$stepGoalStmt = $conn->prepare("SELECT daily_step_goal FROM activity_goals WHERE user_id = ? LIMIT 1");
-$stepGoalStmt->bind_param("i", $userId);
-$stepGoalStmt->execute();
-$sgRow = $stepGoalStmt->get_result()->fetch_assoc();
-$stepGoalStmt->close();
-$stepGoal = $sgRow ? (int)$sgRow["daily_step_goal"] : 8000;
+// 4. Today's Steps & Goal (sync across activity_goals & user_health_goals)
+$sgRow = null;
+$stepGoalStmt = $conn->prepare("SELECT daily_step_goal, updated_at FROM activity_goals WHERE user_id = ? LIMIT 1");
+if ($stepGoalStmt) {
+    $stepGoalStmt->bind_param("i", $userId);
+    $stepGoalStmt->execute();
+    $sgRow = $stepGoalStmt->get_result()->fetch_assoc();
+    $stepGoalStmt->close();
+}
+$hgRow = null;
+$hgStmt = $conn->prepare("SELECT target_steps, updated_at FROM user_health_goals WHERE user_id = ? LIMIT 1");
+if ($hgStmt) {
+    $hgStmt->bind_param("i", $userId);
+    $hgStmt->execute();
+    $hgRow = $hgStmt->get_result()->fetch_assoc();
+    $hgStmt->close();
+}
+$agGoalVal = ($sgRow && (int)($sgRow["daily_step_goal"] ?? 0) > 0) ? (int)$sgRow["daily_step_goal"] : 0;
+$hgGoalVal = ($hgRow && (int)($hgRow["target_steps"] ?? 0) > 0) ? (int)$hgRow["target_steps"] : 0;
+if ($agGoalVal > 0 && $hgGoalVal > 0) {
+    $stepGoal = (!empty($hgRow["updated_at"]) && !empty($sgRow["updated_at"]) && strtotime($hgRow["updated_at"]) > strtotime($sgRow["updated_at"]))
+        ? $hgGoalVal : $agGoalVal;
+} elseif ($agGoalVal > 0) {
+    $stepGoal = $agGoalVal;
+} elseif ($hgGoalVal > 0) {
+    $stepGoal = $hgGoalVal;
+} else {
+    $stepGoal = 8000;
+}
 
 // 4. Today's Steps & Goal (workout_sessions first, fallback to activity_sessions, steps_logs)
 $currentSteps = 0;
@@ -239,12 +282,15 @@ if ($hydStmt) {
     $consumedMl = 0;
 }
 
+$hgRow = null;
 $hgStmt = $conn->prepare("SELECT daily_target_ml FROM hydration_goals WHERE user_id = ? LIMIT 1");
-$hgStmt->bind_param("i", $userId);
-$hgStmt->execute();
-$hgRow = $hgStmt->get_result()->fetch_assoc();
-$hgStmt->close();
-$targetMl = $hgRow ? (int)$hgRow["daily_target_ml"] : 2000;
+if ($hgStmt) {
+    $hgStmt->bind_param("i", $userId);
+    $hgStmt->execute();
+    $hgRow = $hgStmt->get_result()->fetch_assoc();
+    $hgStmt->close();
+}
+$targetMl = ($hgRow && (int)($hgRow["daily_target_ml"] ?? 0) > 0) ? (int)$hgRow["daily_target_ml"] : 2000;
 $glasses = round($consumedMl / 250, 1);
 $hydProgress = ($targetMl > 0) ? min(100, (int)(($consumedMl / $targetMl) * 100)) : 0;
 
@@ -271,17 +317,39 @@ if (!$sleepRow) {
     }
 }
 
+$durationMin = 0;
 if ($sleepRow) {
     $durationMin = (int)$sleepRow["duration_minutes"];
-    $score = isset($sleepRow["sleep_score"]) ? (int)$sleepRow["sleep_score"] : min(100, (int)(($durationMin / 480) * 100));
+    $sleepHrs = $durationMin / 60.0;
+    // Derive quality label & score dynamically from duration when sensor score missing or 0:
+    // <6.0h Poor (~40-55), 6.0-7.0h Fair (~60-74), 7.0-8.5h Optimal (~75-90), >8.5h Deep / Restorative (~90-100)
+    $computedSleepLabel = "No record";
+    $derivedScore = 0;
+    if ($durationMin > 0) {
+        if ($sleepHrs < 6.0) {
+            $computedSleepLabel = "Poor";
+            $derivedScore = max(40, min(55, (int)round(40 + ($sleepHrs / 6.0) * 15)));
+        } elseif ($sleepHrs < 7.0) {
+            $computedSleepLabel = "Fair";
+            $derivedScore = max(60, min(74, (int)round(60 + ($sleepHrs - 6.0) * 14)));
+        } elseif ($sleepHrs <= 8.5) {
+            $computedSleepLabel = "Optimal";
+            $derivedScore = max(75, min(90, (int)round(75 + (($sleepHrs - 7.0) / 1.5) * 15)));
+        } else {
+            $computedSleepLabel = "Excellent";
+            $derivedScore = max(90, min(100, (int)round(90 + min(1.0, ($sleepHrs - 8.5) / 1.5) * 10)));
+        }
+    }
+    $explicitScore = isset($sleepRow["sleep_score"]) ? (int)$sleepRow["sleep_score"] : 0;
+    $score = ($explicitScore > 0) ? $explicitScore : $derivedScore;
     $sleep = [
         "duration_minutes" => $durationMin,
-        "duration_formatted" => intdiv($durationMin, 60) . "h " . ($durationMin % 60) . "m",
+        "duration_formatted" => $durationMin > 0 ? (intdiv($durationMin, 60) . "h " . ($durationMin % 60) . "m") : "--",
         "sleep_score" => $score,
-        "quality" => !empty($sleepRow["quality_label"]) ? $sleepRow["quality_label"] : ($score >= 80 ? "Optimal" : "Normal"),
+        "quality" => $computedSleepLabel,
         "bedtime" => $sleepRow["bedtime"] ?: "",
         "wake_time" => $sleepRow["wake_time"] ?: "",
-        "has_data" => true
+        "has_data" => ($durationMin > 0)
     ];
 } else {
     $sleep = [
@@ -297,39 +365,16 @@ if ($sleepRow) {
 
 $conn->close();
 
-// Compute live wellness score
-$vitalCount = 0;
-$vitalScoreAcc = 0;
-if ($hrRow) {
-    $bpm = (int)$hrRow["value_numeric"];
-    $vitalScoreAcc += ($bpm >= 60 && $bpm <= 90) ? 90 : (($bpm >= 50 && $bpm <= 100) ? 75 : 60);
-    $vitalCount++;
-}
-if ($bpRow) {
-    $sys = (int)$bpRow["systolic"];
-    $dia = (int)$bpRow["diastolic"];
-    $vitalScoreAcc += ($sys <= 120 && $dia <= 80) ? 95 : (($sys <= 130 && $dia <= 85) ? 80 : 65);
-    $vitalCount++;
-}
-if ($spo2Row) {
-    $pct = (int)$spo2Row["value_numeric"];
-    $vitalScoreAcc += ($pct >= 97) ? 98 : (($pct >= 94) ? 80 : 60);
-    $vitalCount++;
-}
-if ($currentSteps > 0) {
-    $vitalScoreAcc += min(100, (int)(($currentSteps / $stepGoal) * 100));
-    $vitalCount++;
-}
-if ($consumedMl > 0) {
-    $vitalScoreAcc += min(100, (int)(($consumedMl / $targetMl) * 100));
-    $vitalCount++;
-}
+// Compute dynamic wellness score (0-100):
+// round(min(35, (todaySteps/stepGoal)*35) + min(35, (todayWaterMl/waterGoalMl)*35) + min(30, (todaySleepMinutes/480)*30))
+$stepsScorePart = ($stepGoal > 0) ? min(35.0, ($currentSteps / (float)$stepGoal) * 35.0) : 0.0;
+$waterScorePart = ($targetMl > 0) ? min(35.0, ($consumedMl / (float)$targetMl) * 35.0) : 0.0;
+$sleepScorePart = min(30.0, ($durationMin / 480.0) * 30.0);
+$liveWellnessScore = max(0, min(100, (int)round($stepsScorePart + $waterScorePart + $sleepScorePart)));
 
-if ($vitalCount > 0) {
-    $liveWellnessScore = (int)round($vitalScoreAcc / $vitalCount);
-    $liveWellnessStatus = ($liveWellnessScore >= 80) ? "Optimal State" : (($liveWellnessScore >= 60) ? "Good State" : "Needs Attention");
+if ($currentSteps > 0 || $consumedMl > 0 || $durationMin > 0) {
+    $liveWellnessStatus = ($liveWellnessScore >= 80) ? "Optimal State" : (($liveWellnessScore >= 55) ? "Good Progress" : "Needs Attention");
 } else {
-    $liveWellnessScore = 0;
     $liveWellnessStatus = "No data recorded";
 }
 

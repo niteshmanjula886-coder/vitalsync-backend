@@ -16,7 +16,20 @@ if ($method !== "POST") {
 $input = getInputData();
 
 $stepCount = isset($input["step_count"]) ? max(0, (int)$input["step_count"]) : (isset($input["steps"]) ? max(0, (int)$input["steps"]) : 0);
-$targetSteps = isset($input["target_steps"]) ? max(1000, (int)$input["target_steps"]) : (isset($input["goal_steps"]) ? max(1000, (int)$input["goal_steps"]) : 8000);
+$targetStepsExplicit = isset($input["target_steps"]) ? (int)$input["target_steps"] : (isset($input["goal_steps"]) ? (int)$input["goal_steps"] : (isset($input["step_goal"]) ? (int)$input["step_goal"] : null));
+$targetSteps = ($targetStepsExplicit !== null && $targetStepsExplicit >= 1000) ? $targetStepsExplicit : 8000;
+if ($targetStepsExplicit === null || $targetStepsExplicit < 1000) {
+    $sgStmt = $conn->prepare("SELECT daily_step_goal FROM activity_goals WHERE user_id = ? LIMIT 1");
+    if ($sgStmt) {
+        $sgStmt->bind_param("i", $userId);
+        $sgStmt->execute();
+        $sgRow = $sgStmt->get_result()->fetch_assoc();
+        $sgStmt->close();
+        if (!empty($sgRow["daily_step_goal"]) && (int)$sgRow["daily_step_goal"] > 0) {
+            $targetSteps = (int)$sgRow["daily_step_goal"];
+        }
+    }
+}
 $distanceKm = isset($input["distance_km"]) ? max(0.0, (float)$input["distance_km"]) : round($stepCount * 0.00075, 2);
 $caloriesKcal = isset($input["calories_kcal"]) ? max(0, (int)$input["calories_kcal"]) : (isset($input["calories"]) ? max(0, (int)$input["calories"]) : (int)round($stepCount * 0.04));
 $activeMinutes = isset($input["active_minutes"]) ? max(0, (int)$input["active_minutes"]) : (int)round($stepCount / 100);
@@ -48,12 +61,20 @@ if ($existing) {
     $iStmt->close();
 }
 
-// Also update `activity_goals` table if exists
-$agStmt = $conn->prepare("INSERT INTO activity_goals (user_id, daily_step_goal) VALUES (?, ?) ON DUPLICATE KEY UPDATE daily_step_goal = VALUES(daily_step_goal)");
-if ($agStmt) {
-    $agStmt->bind_param("ii", $userId, $targetSteps);
-    $agStmt->execute();
-    $agStmt->close();
+// Only update activity_goals & user_health_goals if caller explicitly passed a valid goal >= 1000
+if ($targetStepsExplicit !== null && $targetStepsExplicit >= 1000) {
+    $agStmt = $conn->prepare("INSERT INTO activity_goals (user_id, daily_step_goal) VALUES (?, ?) ON DUPLICATE KEY UPDATE daily_step_goal = VALUES(daily_step_goal)");
+    if ($agStmt) {
+        $agStmt->bind_param("ii", $userId, $targetSteps);
+        $agStmt->execute();
+        $agStmt->close();
+    }
+    $hgStmt = $conn->prepare("INSERT INTO user_health_goals (user_id, target_steps) VALUES (?, ?) ON DUPLICATE KEY UPDATE target_steps = VALUES(target_steps)");
+    if ($hgStmt) {
+        $hgStmt->bind_param("ii", $userId, $targetSteps);
+        $hgStmt->execute();
+        $hgStmt->close();
+    }
 }
 
 // Also sync with `vitals_readings` for step history

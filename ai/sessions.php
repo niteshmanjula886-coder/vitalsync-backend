@@ -9,33 +9,58 @@ if ($method === "OPTIONS") {
     exit(0);
 }
 
+// Ensure ai_chat_sessions check never crashes on missing table/column
+$sessionsTableExists = false;
+try {
+    $tblChk = $conn->query("SHOW TABLES LIKE 'ai_chat_sessions'");
+    if ($tblChk && $tblChk->num_rows > 0) {
+        $sessionsTableExists = true;
+    }
+} catch (Throwable $e) {
+    $sessionsTableExists = false;
+}
+
+if (!$sessionsTableExists) {
+    $conn->close();
+    respondJson(200, [
+        "success" => true,
+        "count" => 0,
+        "sessions" => []
+    ]);
+}
+
 // 1. GET: Fetch list of chat sessions for user
 if ($method === "GET") {
-    $stmt = $conn->prepare(
-        "SELECT s.id, s.title, s.created_at, s.updated_at,
-                (SELECT COUNT(*) FROM ai_chat_messages m WHERE m.session_id = s.id) AS message_count,
-                (SELECT m2.message_text FROM ai_chat_messages m2 WHERE m2.session_id = s.id ORDER BY m2.id DESC LIMIT 1) AS last_message
-         FROM ai_chat_sessions s 
-         WHERE s.user_id = ? 
-         ORDER BY s.updated_at DESC, s.id DESC 
-         LIMIT 100"
-    );
-    $stmt->bind_param("i", $userId);
-    $stmt->execute();
-    $res = $stmt->get_result();
-
     $sessions = [];
-    while ($r = $res->fetch_assoc()) {
-        $sessions[] = [
-            "id" => (int)$r["id"],
-            "title" => $r["title"] ?: "New Chat",
-            "message_count" => (int)($r["message_count"] ?? 0),
-            "last_message" => $r["last_message"] ?: "",
-            "created_at" => $r["created_at"],
-            "updated_at" => $r["updated_at"]
-        ];
+    try {
+        $stmt = $conn->prepare(
+            "SELECT s.id, s.title, s.created_at, s.updated_at,
+                    (SELECT COUNT(*) FROM ai_chat_messages m WHERE m.session_id = s.id) AS message_count,
+                    (SELECT m2.message_text FROM ai_chat_messages m2 WHERE m2.session_id = s.id ORDER BY m2.id DESC LIMIT 1) AS last_message
+             FROM ai_chat_sessions s 
+             WHERE s.user_id = ? 
+             ORDER BY s.updated_at DESC, s.id DESC 
+             LIMIT 100"
+        );
+        if ($stmt) {
+            $stmt->bind_param("i", $userId);
+            $stmt->execute();
+            $res = $stmt->get_result();
+            while ($r = $res->fetch_assoc()) {
+                $sessions[] = [
+                    "id" => (int)$r["id"],
+                    "title" => $r["title"] ?: "New Chat",
+                    "message_count" => (int)($r["message_count"] ?? 0),
+                    "last_message" => $r["last_message"] ?: "",
+                    "created_at" => $r["created_at"],
+                    "updated_at" => $r["updated_at"]
+                ];
+            }
+            $stmt->close();
+        }
+    } catch (Throwable $e) {
+        error_log("Sessions query warning: " . $e->getMessage());
     }
-    $stmt->close();
     $conn->close();
 
     respondJson(200, [

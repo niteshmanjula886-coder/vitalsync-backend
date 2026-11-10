@@ -23,14 +23,9 @@ if ($method !== "GET" && $method !== "POST") {
     ]);
 }
 
-// Determine Monday to Sunday week range
-$ts = time();
-$dayOfWeek = (int)date('N', $ts); // 1 (Mon) to 7 (Sun)
-$startTs = strtotime('-' . ($dayOfWeek - 1) . ' days', $ts);
-$endTs = strtotime('+' . (7 - $dayOfWeek) . ' days', $ts);
-
-$weekStart = date('Y-m-d', $startTs);
-$weekEnd = date('Y-m-d', $endTs);
+// Rolling 7-day window relative to CURDATE() (today and the preceding 6 days)
+$weekStart = date('Y-m-d', strtotime('-6 days'));
+$weekEnd = date('Y-m-d');
 
 // Allow overriding via GET params
 if (!empty($_GET['start_date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['start_date'])) {
@@ -135,38 +130,173 @@ if ($avgSpo2 !== null && $avgSpo2 > 0) {
     else $spo2Category = "Low";
 }
 
-// 4. Sleep Stats
-$slStmt = $conn->prepare("SELECT AVG(duration_minutes) as avg_sleep, SUM(duration_minutes) as total_sleep, COUNT(*) as cnt FROM sleep_logs WHERE user_id = ? AND logged_at BETWEEN ? AND ? AND duration_minutes > 0");
-$slStmt->bind_param("iss", $userId, $weekStart, $weekEnd);
-$slStmt->execute();
-$slRow = $slStmt->get_result()->fetch_assoc();
-$slStmt->close();
-
-$avgSleepMin = ($slRow && $slRow["avg_sleep"] !== null) ? (int)round((float)$slRow["avg_sleep"]) : 0;
-$sleepScore = 0;
-$sleepCategory = "No Data";
-if ($avgSleepMin > 0) {
-    if ($avgSleepMin >= 420) {
-        $sleepScore = 95;
-        $sleepCategory = "Normal";
-    } elseif ($avgSleepMin >= 360) {
-        $sleepScore = 75;
-        $sleepCategory = "Mid";
-    } else {
-        $sleepScore = 50;
-        $sleepCategory = "Low";
+/**
+ * Derive sleep quality score and label from total sleep minutes when an explicit DB quality score is unavailable.
+ */
+function deriveWeeklySleepQuality(int $totalMinutes): array {
+    if ($totalMinutes <= 0) {
+        return [0, "No Log"];
     }
+    if ($totalMinutes < 360) {
+        return [50, "Poor"];
+    }
+    if ($totalMinutes < 420) {
+        return [68, "Fair"];
+    }
+    if ($totalMinutes <= 510) {
+        return [88, "Optimal"];
+    }
+    return [92, "Excellent"];
 }
 
-// 5. Hydration Stats
-$hyStmt = $conn->prepare("SELECT SUM(COALESCE(volume_ml, amount_ml, 0)) as total_intake, AVG(COALESCE(volume_ml, amount_ml, 0)) as avg_intake FROM hydration_logs WHERE user_id = ? AND (log_date BETWEEN ? AND ? OR logged_at BETWEEN ? AND ?)");
-$hyStmt->bind_param("issss", $userId, $weekStart, $weekEnd, $weekStart, $weekEnd);
-$hyStmt->execute();
-$hyRow = $hyStmt->get_result()->fetch_assoc();
-$hyStmt->close();
+// 4. Sleep Stats (Rolling 7 days DATE_SUB(CURDATE(), INTERVAL 6 DAY) .. CURDATE() with complete 7-day array)
+$sleepByDay = [];
+$slStmt = $conn->prepare(
+    "SELECT DATE(COALESCE(logged_at, logged_date, created_at, start_time)) AS log_day,
+            SUM(COALESCE(NULLIF(duration_minutes, 0), TIMESTAMPDIFF(MINUTE, start_time, end_time), 0)) AS total_mins,
+            AVG(NULLIF(quality_score, 0)) AS avg_quality
+     FROM sleep_logs
+     WHERE user_id = ?
+       AND DATE(COALESCE(logged_at, logged_date, created_at, start_time)) >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+       AND DATE(COALESCE(logged_at, logged_date, created_at, start_time)) <= CURDATE()
+       AND COALESCE(NULLIF(duration_minutes, 0), TIMESTAMPDIFF(MINUTE, start_time, end_time), 0) > 0
+     GROUP BY DATE(COALESCE(logged_at, logged_date, created_at, start_time))
+     ORDER BY log_day ASC"
+);
+if ($slStmt) {
+    $slStmt->bind_param("i", $userId);
+    $slStmt->execute();
+    $slRes = $slStmt->get_result();
+    while ($row = $slRes->fetch_assoc()) {
+        if (!empty($row["log_day"])) {
+            $sleepByDay[$row["log_day"]] = [
+                "duration_minutes" => (int)$row["total_mins"],
+                "avg_quality" => $row["avg_quality"] !== null ? (float)$row["avg_quality"] : 0.0
+            ];
+        }
+    }
+    $slStmt->close();
+}
 
-$totalHydrationMl = ($hyRow && $hyRow["total_intake"] !== null) ? (int)$hyRow["total_intake"] : 0;
-$avgHydrationMl = ($hyRow && $hyRow["avg_intake"] !== null) ? (int)round((float)$hyRow["avg_intake"]) : 0;
+// Fallback / supplement per missing day (or missing quality score) from sleep_records
+try {
+    $srStmt = $conn->prepare(
+        "SELECT date_string AS log_day,
+                SUM(duration_minutes) AS total_mins,
+                AVG(NULLIF(sleep_score, 0)) AS avg_quality
+         FROM sleep_records
+         WHERE user_id = ?
+           AND date_string >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+           AND date_string <= CURDATE()
+           AND duration_minutes > 0
+         GROUP BY date_string
+         ORDER BY log_day ASC"
+    );
+    if ($srStmt) {
+        $srStmt->bind_param("i", $userId);
+        $srStmt->execute();
+        $srRes = $srStmt->get_result();
+        while ($row = $srRes->fetch_assoc()) {
+            $d = $row["log_day"] ?? "";
+            if ($d === "") {
+                continue;
+            }
+            $srQuality = $row["avg_quality"] !== null ? (float)$row["avg_quality"] : 0.0;
+            if (empty($sleepByDay[$d])) {
+                $sleepByDay[$d] = [
+                    "duration_minutes" => (int)$row["total_mins"],
+                    "avg_quality" => $srQuality
+                ];
+            } elseif ($sleepByDay[$d]["avg_quality"] <= 0 && $srQuality > 0) {
+                $sleepByDay[$d]["avg_quality"] = $srQuality;
+            }
+        }
+        $srStmt->close();
+    }
+} catch (\Exception $e) {}
+
+// Build complete 7-day sleep array (CURDATE() - 6 DAYS .. CURDATE(), empty days initialized with 0 / "No Log")
+$sleepDays = [];
+$totalSleepMins = 0;
+$totalQualityScore = 0;
+$loggedSleepDays = 0;
+for ($offset = 6; $offset >= 0; $offset--) {
+    $dayDate = date('Y-m-d', strtotime("-{$offset} days"));
+    $dayLabel = date('D', strtotime($dayDate));
+    $entry = $sleepByDay[$dayDate] ?? null;
+    $mins = $entry ? (int)$entry["duration_minutes"] : 0;
+    if ($mins > 0) {
+        [$derivedScore, $dayQuality] = deriveWeeklySleepQuality($mins);
+        $dbQuality = $entry ? (float)$entry["avg_quality"] : 0.0;
+        $dayQualityScore = ($dbQuality > 0) ? max(1, min(100, (int)round($dbQuality))) : $derivedScore;
+        $totalSleepMins += $mins;
+        $totalQualityScore += $dayQualityScore;
+        $loggedSleepDays++;
+    } else {
+        $dayQualityScore = 0;
+        $dayQuality = "No Log";
+    }
+    $sleepDays[] = [
+        "date" => $dayDate,
+        "day_label" => $dayLabel,
+        "duration" => $mins,
+        "duration_minutes" => $mins,
+        "quality_score" => $dayQualityScore,
+        "quality" => $dayQuality,
+        "quality_label" => $dayQuality
+    ];
+}
+
+$avgSleepMin = $loggedSleepDays > 0 ? (int)round($totalSleepMins / $loggedSleepDays) : 0;
+$averageSleepQuality = $loggedSleepDays > 0 ? (int)round($totalQualityScore / $loggedSleepDays) : 0;
+$sleepScore = $averageSleepQuality;
+if ($avgSleepMin > 0) {
+    [, $sleepCategory] = deriveWeeklySleepQuality($avgSleepMin);
+} else {
+    $sleepCategory = "No Data";
+}
+
+// 5. Hydration Stats (Rolling 7 days relative to CURDATE(), 0 ml for empty days, sum of 7 days)
+$hydrationByDay = [];
+$hyStmt = $conn->prepare(
+    "SELECT DATE(COALESCE(logged_at, log_date, logged_date, date_string, created_at)) AS h_day,
+            COALESCE(SUM(COALESCE(volume_ml, intake_ml, amount_ml, 0)), 0) AS day_ml
+     FROM hydration_logs
+     WHERE user_id = ?
+       AND DATE(COALESCE(logged_at, log_date, logged_date, date_string, created_at)) >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+     GROUP BY DATE(COALESCE(logged_at, log_date, logged_date, date_string, created_at))
+     ORDER BY h_day ASC"
+);
+if ($hyStmt) {
+    $hyStmt->bind_param("i", $userId);
+    $hyStmt->execute();
+    $hyRes = $hyStmt->get_result();
+    while ($hRow = $hyRes->fetch_assoc()) {
+        if (!empty($hRow["h_day"])) {
+            $hydrationByDay[$hRow["h_day"]] = (int)$hRow["day_ml"];
+        }
+    }
+    $hyStmt->close();
+}
+
+$hydrationDays = [];
+$totalHydrationMl = 0;
+$hydDays = 0;
+for ($offset = 6; $offset >= 0; $offset--) {
+    $dDate = date('Y-m-d', strtotime("-{$offset} days"));
+    $dMl = isset($hydrationByDay[$dDate]) ? max(0, (int)$hydrationByDay[$dDate]) : 0;
+    if ($dMl > 0) {
+        $hydDays++;
+    }
+    $totalHydrationMl += $dMl;
+    $hydrationDays[] = [
+        "date" => $dDate,
+        "day_label" => date('D', strtotime($dDate)),
+        "intake_ml" => $dMl
+    ];
+}
+$avgHydrationMl = $hydDays > 0 ? (int)round($totalHydrationMl / $hydDays) : 0;
+
 $hydrationScore = 0;
 $hydrationCategory = "No Data";
 if ($avgHydrationMl > 0) {
@@ -182,31 +312,58 @@ if ($avgHydrationMl > 0) {
     }
 }
 
-// 6. Activity / Steps Stats
-$stStmt = $conn->prepare("SELECT SUM(steps) as total_steps, AVG(steps) as avg_steps FROM workout_sessions WHERE user_id = ? AND DATE(start_time) BETWEEN ? AND ?");
-$stStmt->bind_param("iss", $userId, $weekStart, $weekEnd);
-$stStmt->execute();
-$stRow = $stStmt->get_result()->fetch_assoc();
-$stStmt->close();
+// 6. Activity / Steps & Workout Frequency Stats (Rolling 7 days)
+$wsSteps = 0;
+$workoutCount = 0;
+$stStmt = $conn->prepare(
+    "SELECT COALESCE(SUM(steps), 0) AS total_steps, COUNT(*) AS cnt
+     FROM workout_sessions
+     WHERE user_id = ?
+       AND DATE(COALESCE(NULLIF(start_time, ''), date_string, created_at)) BETWEEN ? AND ?"
+);
+if ($stStmt) {
+    $stStmt->bind_param("iss", $userId, $weekStart, $weekEnd);
+    $stStmt->execute();
+    $stRow = $stStmt->get_result()->fetch_assoc();
+    $stStmt->close();
+    $wsSteps = (int)($stRow["total_steps"] ?? 0);
+    $workoutCount = (int)($stRow["cnt"] ?? 0);
+}
 
-$totalSteps = ($stRow && $stRow["total_steps"] !== null) ? (int)$stRow["total_steps"] : 0;
-$avgSteps = ($stRow && $stRow["avg_steps"] !== null) ? (int)round((float)$stRow["avg_steps"]) : 0;
+$asSteps = 0;
+$asCount = 0;
+$asStmt = $conn->prepare(
+    "SELECT COALESCE(SUM(steps), 0) AS total_steps, COUNT(*) AS cnt
+     FROM activity_sessions
+     WHERE user_id = ? AND DATE(start_time) BETWEEN ? AND ?"
+);
+if ($asStmt) {
+    $asStmt->bind_param("iss", $userId, $weekStart, $weekEnd);
+    $asStmt->execute();
+    $asRow = $asStmt->get_result()->fetch_assoc();
+    $asStmt->close();
+    $asSteps = (int)($asRow["total_steps"] ?? 0);
+    $asCount = (int)($asRow["cnt"] ?? 0);
+}
 
-if ($avgSteps === 0) {
-    // Check steps_logs table if exists
-    $chkTable = $conn->query("SHOW TABLES LIKE 'steps_logs'");
-    if ($chkTable && $chkTable->num_rows > 0) {
-        $slq = $conn->prepare("SELECT SUM(step_count) as total_steps, AVG(step_count) as avg_steps FROM steps_logs WHERE user_id = ? AND logged_date BETWEEN ? AND ?");
+$slSteps = 0;
+$chkTable = $conn->query("SHOW TABLES LIKE 'steps_logs'");
+if ($chkTable && $chkTable->num_rows > 0) {
+    $slq = $conn->prepare("SELECT COALESCE(SUM(step_count), 0) AS total_steps FROM steps_logs WHERE user_id = ? AND logged_date BETWEEN ? AND ?");
+    if ($slq) {
         $slq->bind_param("iss", $userId, $weekStart, $weekEnd);
         $slq->execute();
         $slRow = $slq->get_result()->fetch_assoc();
         $slq->close();
-        if ($slRow && $slRow["avg_steps"] !== null) {
-            $totalSteps = (int)$slRow["total_steps"];
-            $avgSteps = (int)round((float)$slRow["avg_steps"]);
-        }
+        $slSteps = (int)($slRow["total_steps"] ?? 0);
     }
 }
+
+$totalSteps = max($wsSteps, $asSteps, $slSteps);
+if ($workoutCount === 0 && $asCount > 0) {
+    $workoutCount = $asCount;
+}
+$avgSteps = (int)round($totalSteps / 7);
 
 $activityScore = 0;
 $activityCategory = "No Data";
@@ -301,25 +458,38 @@ respondJson(200, [
         "wellness_score" => $wellnessScore,
         "performance_category" => $performanceCategory,
         "category_label" => ucfirst($performanceCategory),
+        "average_duration_minutes" => $avgSleepMin,
+        "average_sleep_quality" => $averageSleepQuality,
+        "logged_sleep_days" => $loggedSleepDays,
         "scores" => [
             "heart_rate" => $hrScore,
             "sleep" => $sleepScore,
             "hydration" => $hydrationScore,
             "activity" => $activityScore
         ],
+        "sleep_days" => $sleepDays,
+        "hydration_days" => $hydrationDays,
         "metrics" => [
             "heart_rate_avg" => $avgHr !== null ? "{$avgHr} BPM" : "-- BPM",
             "heart_rate_status" => $hrCategory,
+            "avg_hr_bpm" => $avgHr !== null ? (int)$avgHr : null,
             "bp_avg" => ($avgSys !== null && $avgDia !== null) ? "{$avgSys}/{$avgDia} mmHg" : "--/--",
             "bp_status" => $bpCategory,
             "spo2_avg" => $avgSpo2 !== null ? "{$avgSpo2}%" : "--%",
             "spo2_status" => $spo2Category,
-            "sleep_quality" => $avgSleepMin > 0 ? (intdiv($avgSleepMin, 60) . "h " . ($avgSleepMin % 60) . "m") : "--",
+            "sleep_quality" => $avgSleepMin > 0 ? "{$averageSleepQuality}% - {$sleepCategory}" : "--",
             "sleep_status" => $sleepCategory,
-            "hydration_total" => $totalHydrationMl > 0 ? "{$totalHydrationMl} ml" : "-- ml",
+            "avg_sleep_minutes" => $avgSleepMin,
+            "average_duration_minutes" => $avgSleepMin,
+            "average_sleep_quality" => $averageSleepQuality,
+            "sleep_score" => $averageSleepQuality,
+            "hydration_total" => $totalHydrationMl > 0 ? "{$totalHydrationMl} ml" : "0 ml",
             "hydration_status" => $hydrationCategory,
-            "activity_steps" => $totalSteps > 0 ? number_format($totalSteps) . " steps" : "-- steps",
-            "activity_status" => $activityCategory
+            "total_hydration_ml" => $totalHydrationMl,
+            "activity_steps" => $totalSteps > 0 ? number_format($totalSteps) . " steps" : "0 steps",
+            "activity_status" => $activityCategory,
+            "total_steps" => $totalSteps,
+            "workout_count" => $workoutCount
         ],
         "summary_text" => $summaryText
     ]

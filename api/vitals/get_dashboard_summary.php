@@ -23,19 +23,25 @@ $scoreComponents = [];
 
 // 1. Fetch latest Heart Rate (from vitals_logs or vitals_readings)
 $hrData = null;
+$hrRow = null;
 $stmtHr = $conn->prepare("SELECT heart_rate, logged_at FROM vitals_logs WHERE user_id = ? AND heart_rate IS NOT NULL AND heart_rate > 0 ORDER BY logged_at DESC LIMIT 1");
-$stmtHr->bind_param("i", $userId);
-$stmtHr->execute();
-$hrRow = $stmtHr->get_result()->fetch_assoc();
-$stmtHr->close();
+if ($stmtHr) {
+    $stmtHr->bind_param("i", $userId);
+    $stmtHr->execute();
+    $hrRow = $stmtHr->get_result()->fetch_assoc();
+    $stmtHr->close();
+}
 
 if (!$hrRow) {
     // Fallback to vitals_readings
+    $hrRow2 = null;
     $stmtHr2 = $conn->prepare("SELECT value_numeric, status_label, recorded_at FROM vitals_readings WHERE user_id = ? AND reading_type = 'heart_rate' ORDER BY recorded_at DESC LIMIT 1");
-    $stmtHr2->bind_param("i", $userId);
-    $stmtHr2->execute();
-    $hrRow2 = $stmtHr2->get_result()->fetch_assoc();
-    $stmtHr2->close();
+    if ($stmtHr2) {
+        $stmtHr2->bind_param("i", $userId);
+        $stmtHr2->execute();
+        $hrRow2 = $stmtHr2->get_result()->fetch_assoc();
+        $stmtHr2->close();
+    }
     if ($hrRow2) {
         $bpm = (int)$hrRow2["value_numeric"];
         $status = $hrRow2["status_label"] ?: "Normal";
@@ -61,18 +67,24 @@ if (!$hrRow) {
 
 // 2. Fetch latest SpO2
 $spo2Data = null;
+$spo2Row = null;
 $stmtSpo2 = $conn->prepare("SELECT spo2, logged_at FROM vitals_logs WHERE user_id = ? AND spo2 IS NOT NULL AND spo2 > 0 ORDER BY logged_at DESC LIMIT 1");
-$stmtSpo2->bind_param("i", $userId);
-$stmtSpo2->execute();
-$spo2Row = $stmtSpo2->get_result()->fetch_assoc();
-$stmtSpo2->close();
+if ($stmtSpo2) {
+    $stmtSpo2->bind_param("i", $userId);
+    $stmtSpo2->execute();
+    $spo2Row = $stmtSpo2->get_result()->fetch_assoc();
+    $stmtSpo2->close();
+}
 
 if (!$spo2Row) {
+    $spo2Row2 = null;
     $stmtSpo2_2 = $conn->prepare("SELECT value_numeric, status_label, recorded_at FROM vitals_readings WHERE user_id = ? AND reading_type = 'spo2' ORDER BY recorded_at DESC LIMIT 1");
-    $stmtSpo2_2->bind_param("i", $userId);
-    $stmtSpo2_2->execute();
-    $spo2Row2 = $stmtSpo2_2->get_result()->fetch_assoc();
-    $stmtSpo2_2->close();
+    if ($stmtSpo2_2) {
+        $stmtSpo2_2->bind_param("i", $userId);
+        $stmtSpo2_2->execute();
+        $spo2Row2 = $stmtSpo2_2->get_result()->fetch_assoc();
+        $stmtSpo2_2->close();
+    }
     if ($spo2Row2) {
         $pct = (int)$spo2Row2["value_numeric"];
         $status = $spo2Row2["status_label"] ?: ($pct >= 95 ? "Optimal" : "Low");
@@ -98,18 +110,24 @@ if (!$spo2Row) {
 
 // 3. Fetch latest Blood Pressure
 $bpData = null;
+$bpRow = null;
 $stmtBp = $conn->prepare("SELECT systolic_bp, diastolic_bp, logged_at FROM vitals_logs WHERE user_id = ? AND systolic_bp IS NOT NULL AND systolic_bp > 0 ORDER BY logged_at DESC LIMIT 1");
-$stmtBp->bind_param("i", $userId);
-$stmtBp->execute();
-$bpRow = $stmtBp->get_result()->fetch_assoc();
-$stmtBp->close();
+if ($stmtBp) {
+    $stmtBp->bind_param("i", $userId);
+    $stmtBp->execute();
+    $bpRow = $stmtBp->get_result()->fetch_assoc();
+    $stmtBp->close();
+}
 
 if (!$bpRow) {
+    $bpRow2 = null;
     $stmtBp2 = $conn->prepare("SELECT value_numeric, value_secondary, value_text, status_label, recorded_at FROM vitals_readings WHERE user_id = ? AND reading_type = 'blood_pressure' ORDER BY recorded_at DESC LIMIT 1");
-    $stmtBp2->bind_param("i", $userId);
-    $stmtBp2->execute();
-    $bpRow2 = $stmtBp2->get_result()->fetch_assoc();
-    $stmtBp2->close();
+    if ($stmtBp2) {
+        $stmtBp2->bind_param("i", $userId);
+        $stmtBp2->execute();
+        $bpRow2 = $stmtBp2->get_result()->fetch_assoc();
+        $stmtBp2->close();
+    }
     if ($bpRow2) {
         $sys = (int)$bpRow2["value_numeric"];
         $dia = (int)$bpRow2["value_secondary"];
@@ -141,11 +159,14 @@ if (!$bpRow) {
 
 // 4. Fetch today's Steps Summary
 $stepsData = null;
+$stepRow = null;
 $stmtSteps = $conn->prepare("SELECT step_count, target_steps, distance_km, calories_kcal, active_minutes, logged_date FROM steps_logs WHERE user_id = ? AND logged_date = ? LIMIT 1");
-$stmtSteps->bind_param("is", $userId, $date);
-$stmtSteps->execute();
-$stepRow = $stmtSteps->get_result()->fetch_assoc();
-$stmtSteps->close();
+if ($stmtSteps) {
+    $stmtSteps->bind_param("is", $userId, $date);
+    $stmtSteps->execute();
+    $stepRow = $stmtSteps->get_result()->fetch_assoc();
+    $stmtSteps->close();
+}
 
 if ($stepRow && (int)$stepRow["step_count"] > 0) {
     $sc = (int)$stepRow["step_count"];
@@ -165,11 +186,14 @@ if ($stepRow && (int)$stepRow["step_count"] > 0) {
 
 // 5. Fetch today's Sleep Summary
 $sleepData = null;
+$sleepRow = null;
 $stmtSleep = $conn->prepare("SELECT bedtime, wake_time, duration_minutes, status_color FROM sleep_logs WHERE user_id = ? AND logged_date = ? LIMIT 1");
-$stmtSleep->bind_param("is", $userId, $date);
-$stmtSleep->execute();
-$sleepRow = $stmtSleep->get_result()->fetch_assoc();
-$stmtSleep->close();
+if ($stmtSleep) {
+    $stmtSleep->bind_param("is", $userId, $date);
+    $stmtSleep->execute();
+    $sleepRow = $stmtSleep->get_result()->fetch_assoc();
+    $stmtSleep->close();
+}
 
 if ($sleepRow && (int)$sleepRow["duration_minutes"] > 0) {
     $dur = (int)$sleepRow["duration_minutes"];
@@ -188,11 +212,14 @@ if ($sleepRow && (int)$sleepRow["duration_minutes"] > 0) {
 
 // 6. Fetch today's Hydration Summary
 $hydrationData = null;
+$hydRow = null;
 $stmtHyd = $conn->prepare("SELECT COALESCE(intake_ml, amount_ml) as intake, target_ml FROM hydration_logs WHERE user_id = ? AND (logged_date = ? OR date_string = ?) ORDER BY id DESC LIMIT 1");
-$stmtHyd->bind_param("iss", $userId, $date, $date);
-$stmtHyd->execute();
-$hydRow = $stmtHyd->get_result()->fetch_assoc();
-$stmtHyd->close();
+if ($stmtHyd) {
+    $stmtHyd->bind_param("iss", $userId, $date, $date);
+    $stmtHyd->execute();
+    $hydRow = $stmtHyd->get_result()->fetch_assoc();
+    $stmtHyd->close();
+}
 
 if ($hydRow && (int)$hydRow["intake"] > 0) {
     $intake = (int)$hydRow["intake"];

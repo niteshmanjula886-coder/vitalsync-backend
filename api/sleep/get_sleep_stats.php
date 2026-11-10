@@ -50,26 +50,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 // Function to determine standardized color metadata based on duration (minutes) and quality
 function getSleepQualityMetadata($durationMinutes, $qualityScore = null) {
     $hours = $durationMinutes / 60.0;
-    
-    if ($hours > 9.5) {
+
+    if ($durationMinutes <= 0) {
         return [
-            'status' => 'Excessive',
+            'status' => 'No Log',
+            'color_hex' => '#9CA3AF',
+            'badge_bg_hex' => '#F3F4F6',
+            'quality_label' => 'No Log',
+            'medical_meaning' => 'No sleep session logged for this date'
+        ];
+    } elseif ($hours > 8.5) {
+        return [
+            'status' => 'Excellent',
             'color_hex' => '#7E57C2',
             'badge_bg_hex' => '#EDE7F6',
-            'quality_label' => 'Long Sleep',
-            'medical_meaning' => 'Hypersomnia / recovery rebound'
+            'quality_label' => 'Excellent',
+            'medical_meaning' => 'Excellent deep restorative sleep recovery'
         ];
-    } elseif ($hours >= 7.5 || ($qualityScore !== null && $qualityScore >= 85)) {
+    } elseif ($hours >= 7.0) {
         return [
             'status' => 'Optimal',
             'color_hex' => '#4CAF50',
             'badge_bg_hex' => '#E8F5E9',
-            'quality_label' => 'Restorative',
+            'quality_label' => 'Optimal',
             'medical_meaning' => 'Optimal recovery, restorative sleep'
         ];
-    } elseif ($hours >= 6.0 || ($qualityScore !== null && $qualityScore >= 70)) {
+    } elseif ($hours >= 6.0) {
         return [
-            'status' => 'Moderate',
+            'status' => 'Fair',
             'color_hex' => '#FFC107',
             'badge_bg_hex' => '#FFF8E1',
             'quality_label' => 'Fair',
@@ -77,10 +85,10 @@ function getSleepQualityMetadata($durationMinutes, $qualityScore = null) {
         ];
     } else {
         return [
-            'status' => 'Deficit',
+            'status' => 'Poor',
             'color_hex' => '#FF5252',
             'badge_bg_hex' => '#FFEBEE',
-            'quality_label' => 'Sleep Debt',
+            'quality_label' => 'Poor',
             'medical_meaning' => 'Critical sleep debt, elevated cortisol'
         ];
     }
@@ -167,7 +175,15 @@ try {
         $lRec = $lStmt->fetch();
         if ($lRec && (int)$lRec['duration_minutes'] > 0) {
             $durationMin = (int)$lRec['duration_minutes'];
-            $qualityScore = $lRec['quality_score'] !== null ? (int)$lRec['quality_score'] : 80;
+            $hoursVal = $durationMin / 60.0;
+            $derivedScore = ($hoursVal < 6.0)
+                ? max(40, min(55, (int)round(40 + ($hoursVal / 6.0) * 15)))
+                : (($hoursVal < 7.0)
+                    ? max(60, min(74, (int)round(60 + ($hoursVal - 6.0) * 14)))
+                    : (($hoursVal <= 8.5)
+                        ? max(75, min(90, (int)round(75 + (($hoursVal - 7.0) / 1.5) * 15)))
+                        : max(90, min(100, (int)round(90 + min(1.0, ($hoursVal - 8.5) / 1.5) * 10)))));
+            $qualityScore = ($lRec['quality_score'] !== null && (int)$lRec['quality_score'] > 0) ? (int)$lRec['quality_score'] : $derivedScore;
             $bedtime = !empty($lRec['bedtime']) ? $lRec['bedtime'] : ($lRec['start_time'] ? date('h:i A', strtotime($lRec['start_time'])) : '10:30 PM');
             $wakeTime = !empty($lRec['wake_time']) ? $lRec['wake_time'] : ($lRec['end_time'] ? date('h:i A', strtotime($lRec['end_time'])) : '06:30 AM');
             $recordDate = $lRec['logged_at'] ?: date('Y-m-d');
@@ -176,6 +192,17 @@ try {
             $remMin = (int)round($durationMin * 0.21);
             $awakeMin = (int)round($durationMin * 0.05);
         }
+    }
+
+    if ($durationMin > 0 && $qualityScore <= 0) {
+        $hoursVal = $durationMin / 60.0;
+        $qualityScore = ($hoursVal < 6.0)
+            ? max(40, min(55, (int)round(40 + ($hoursVal / 6.0) * 15)))
+            : (($hoursVal < 7.0)
+                ? max(60, min(74, (int)round(60 + ($hoursVal - 6.0) * 14)))
+                : (($hoursVal <= 8.5)
+                    ? max(75, min(90, (int)round(75 + (($hoursVal - 7.0) / 1.5) * 15)))
+                    : max(90, min(100, (int)round(90 + min(1.0, ($hoursVal - 8.5) / 1.5) * 10)))));
     }
 
     // Determine color metadata for current session
@@ -243,7 +270,7 @@ try {
         $hScore = (int)$hr['sleep_score'];
         $hMeta = getSleepQualityMetadata($hDur, $hScore);
 
-        if ($hMeta['status'] === 'Optimal') {
+        if ($hMeta['status'] === 'Optimal' || $hMeta['status'] === 'Excellent') {
             $optimalCount++;
         }
         $totalHistoryDuration += $hDur;

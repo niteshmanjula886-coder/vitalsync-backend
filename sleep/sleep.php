@@ -2,6 +2,27 @@
 
 require_once __DIR__ . "/../config/auth_middleware.php";
 
+function evaluateSleepQualityMeta(int $durationMinutes): array {
+    if ($durationMinutes <= 0) {
+        return ["No record", 0, "none"];
+    }
+    $hrs = $durationMinutes / 60.0;
+    if ($hrs < 6.0) {
+        $score = max(40, min(55, (int)round(40 + ($hrs / 6.0) * 15)));
+        return ["Poor", $score, "critical"];
+    }
+    if ($hrs < 7.0) {
+        $score = max(60, min(74, (int)round(60 + ($hrs - 6.0) * 14)));
+        return ["Fair", $score, "warning"];
+    }
+    if ($hrs <= 8.5) {
+        $score = max(75, min(90, (int)round(75 + (($hrs - 7.0) / 1.5) * 15)));
+        return ["Optimal", $score, "optimal"];
+    }
+    $score = max(90, min(100, (int)round(90 + min(1.0, ($hrs - 8.5) / 1.5) * 10)));
+    return ["Excellent", $score, "optimal"];
+}
+
 $userId = resolveUserIdOrDie($conn, true);
 $method = $_SERVER["REQUEST_METHOD"];
 
@@ -22,7 +43,7 @@ if ($method === "GET") {
 
     $durationMin = $rec ? (int)$rec["duration_minutes"] : 0;
     $score = $rec ? (int)$rec["sleep_score"] : 0;
-    $quality = $rec ? $rec["quality_label"] : "No record";
+    $recordDate = $rec ? $rec["date_string"] : $date;
     $bedtime = $rec ? $rec["bedtime"] : "";
     $wakeTime = $rec ? $rec["wake_time"] : "";
     $deep = $rec ? (int)$rec["deep_sleep_minutes"] : 0;
@@ -32,16 +53,16 @@ if ($method === "GET") {
 
     // Fallback to sleep_logs if sleep_records empty
     if ($durationMin <= 0) {
-        $slStmt = $conn->prepare("SELECT id, start_time, end_time, duration_minutes, quality_score, bedtime, wake_time, logged_at FROM sleep_logs WHERE user_id = ? AND (logged_at = ? OR logged_at <= ?) ORDER BY logged_at DESC LIMIT 1");
+        $slStmt = $conn->prepare("SELECT id, start_time, end_time, duration_minutes, quality_score, bedtime, wake_time, COALESCE(logged_at, logged_date, DATE(start_time)) AS log_date FROM sleep_logs WHERE user_id = ? AND (logged_at = ? OR logged_at <= ? OR logged_date = ? OR logged_date <= ?) ORDER BY COALESCE(logged_at, logged_date, DATE(start_time)) DESC LIMIT 1");
         if ($slStmt) {
-            $slStmt->bind_param("iss", $userId, $date, $date);
+            $slStmt->bind_param("issss", $userId, $date, $date, $date, $date);
             $slStmt->execute();
             $slRec = $slStmt->get_result()->fetch_assoc();
             $slStmt->close();
             if ($slRec && (int)$slRec["duration_minutes"] > 0) {
                 $durationMin = (int)$slRec["duration_minutes"];
-                $score = $slRec["quality_score"] !== null ? (int)$slRec["quality_score"] : 80;
-                $quality = ($durationMin < 360) ? "Insufficient" : (($durationMin < 480) ? "Fair" : "Restful");
+                $score = $slRec["quality_score"] !== null ? (int)$slRec["quality_score"] : 0;
+                $recordDate = !empty($slRec["log_date"]) ? $slRec["log_date"] : $date;
                 $bedtime = !empty($slRec["bedtime"]) ? $slRec["bedtime"] : date("h:i A", strtotime($slRec["start_time"]));
                 $wakeTime = !empty($slRec["wake_time"]) ? $slRec["wake_time"] : date("h:i A", strtotime($slRec["end_time"]));
                 $deep = (int)($durationMin * 0.22);
@@ -52,35 +73,76 @@ if ($method === "GET") {
         }
     }
 
+    [$quality, $derivedScore] = evaluateSleepQualityMeta($durationMin);
+    if ($durationMin > 0 && $score <= 0) {
+        $score = $derivedScore;
+    }
+
     $hours = intdiv($durationMin, 60);
     $minutes = $durationMin % 60;
 
-    // Fetch 7-day sleep history
+    // Fetch 7-day sleep history (sleep_records primary, fallback/merge from sleep_logs)
+    $historyByDate = [];
     $hStmt = $conn->prepare(
-        "SELECT date_string, duration_minutes, sleep_score, quality_label 
+        "SELECT date_string, duration_minutes, sleep_score 
          FROM sleep_records 
          WHERE user_id = ? 
-         ORDER BY date_string DESC LIMIT 7"
+         ORDER BY date_string DESC LIMIT 14"
     );
-    $hStmt->bind_param("i", $userId);
-    $hStmt->execute();
-    $hRes = $hStmt->get_result();
-    $weekHistory = [];
-    while ($r = $hRes->fetch_assoc()) {
-        $weekHistory[] = [
-            "date" => $r["date_string"],
-            "duration_minutes" => (int)$r["duration_minutes"],
-            "sleep_score" => (int)$r["sleep_score"],
-            "quality" => $r["quality_label"]
-        ];
+    if ($hStmt) {
+        $hStmt->bind_param("i", $userId);
+        $hStmt->execute();
+        $hRes = $hStmt->get_result();
+        while ($r = $hRes->fetch_assoc()) {
+            $d = $r["date_string"];
+            $dur = (int)$r["duration_minutes"];
+            if ($dur <= 0 || isset($historyByDate[$d])) continue;
+            [$rQuality, $rDerivedScore] = evaluateSleepQualityMeta($dur);
+            $rScore = (int)$r["sleep_score"] > 0 ? (int)$r["sleep_score"] : $rDerivedScore;
+            $historyByDate[$d] = [
+                "date" => $d,
+                "duration_minutes" => $dur,
+                "sleep_score" => $rScore,
+                "quality" => $rQuality
+            ];
+        }
+        $hStmt->close();
     }
-    $hStmt->close();
+
+    $slHistStmt = $conn->prepare(
+        "SELECT COALESCE(logged_at, logged_date, DATE(start_time)) AS log_date, duration_minutes, quality_score
+         FROM sleep_logs
+         WHERE user_id = ? AND duration_minutes > 0
+         ORDER BY COALESCE(logged_at, logged_date, DATE(start_time)) DESC LIMIT 14"
+    );
+    if ($slHistStmt) {
+        $slHistStmt->bind_param("i", $userId);
+        $slHistStmt->execute();
+        $slHistRes = $slHistStmt->get_result();
+        while ($r = $slHistRes->fetch_assoc()) {
+            $d = $r["log_date"];
+            $dur = (int)$r["duration_minutes"];
+            if (empty($d) || $dur <= 0 || isset($historyByDate[$d])) continue;
+            [$rQuality, $rDerivedScore] = evaluateSleepQualityMeta($dur);
+            $rScore = ($r["quality_score"] !== null && (int)$r["quality_score"] > 0) ? (int)$r["quality_score"] : $rDerivedScore;
+            $historyByDate[$d] = [
+                "date" => $d,
+                "duration_minutes" => $dur,
+                "sleep_score" => $rScore,
+                "quality" => $rQuality
+            ];
+        }
+        $slHistStmt->close();
+    }
+
+    krsort($historyByDate);
+    $weekHistory = array_slice(array_values($historyByDate), 0, 7);
     $conn->close();
 
     respondJson(200, [
         "success" => true,
         "sleep" => [
-            "date" => $rec ? $rec["date_string"] : $date,
+            "date" => $recordDate,
             "duration_minutes" => $durationMin,
             "duration_formatted" => "{$hours}h {$minutes}m",
             "sleep_score" => $score,
@@ -89,11 +151,11 @@ if ($method === "GET") {
             "wake_time" => $wakeTime,
             "stages" => [
                 "deep_sleep_minutes" => $deep,
-                "deep_sleep_percent" => round(($deep / $durationMin) * 100, 1),
+                "deep_sleep_percent" => $durationMin > 0 ? round(($deep / $durationMin) * 100, 1) : 0,
                 "light_sleep_minutes" => $light,
-                "light_sleep_percent" => round(($light / $durationMin) * 100, 1),
+                "light_sleep_percent" => $durationMin > 0 ? round(($light / $durationMin) * 100, 1) : 0,
                 "rem_sleep_minutes" => $rem,
-                "rem_sleep_percent" => round(($rem / $durationMin) * 100, 1),
+                "rem_sleep_percent" => $durationMin > 0 ? round(($rem / $durationMin) * 100, 1) : 0,
                 "awake_minutes" => $awake
             ],
             "recent_history" => $weekHistory
@@ -106,21 +168,35 @@ if ($method === "POST") {
 
     $dateString = !empty($data["date_string"]) ? trim((string)$data["date_string"]) : date("Y-m-d");
     $duration = isset($data["duration_minutes"]) ? (int)$data["duration_minutes"] : 0;
-    $score = isset($data["sleep_score"]) ? (int)$data["sleep_score"] : 80;
-    $quality = trim((string)($data["quality_label"] ?? "Restful"));
     $bedtime = trim((string)($data["bedtime"] ?? "10:30 PM"));
-    $wakeTime = trim((string)($data["wake_time"] ?? "06:15 AM"));
-    $deep = isset($data["deep_sleep_minutes"]) ? (int)$data["deep_sleep_minutes"] : (int)($duration * 0.22);
-    $light = isset($data["light_sleep_minutes"]) ? (int)$data["light_sleep_minutes"] : (int)($duration * 0.55);
-    $rem = isset($data["rem_sleep_minutes"]) ? (int)$data["rem_sleep_minutes"] : (int)($duration * 0.18);
-    $awake = isset($data["awake_minutes"]) ? (int)$data["awake_minutes"] : (int)($duration * 0.05);
+    $wakeTime = trim((string)($data["wake_time"] ?? "06:30 AM"));
 
-    if ($duration <= 60 || $duration > 1440) {
+    if ($duration <= 0 && !empty($bedtime) && !empty($wakeTime)) {
+        $bt = strtotime($bedtime);
+        $wt = strtotime($wakeTime);
+        if ($bt !== false && $wt !== false) {
+            if ($wt <= $bt) {
+                $wt += 86400;
+            }
+            $duration = (int)round(($wt - $bt) / 60);
+        }
+    }
+
+    if ($duration <= 0 || $duration > 1440) {
         respondJson(400, [
             "success" => false,
-            "message" => "Please enter a realistic sleep duration between 60 and 1440 minutes"
+            "message" => "Please enter a realistic sleep duration between 1 and 1440 minutes"
         ]);
     }
+
+    [$derivedQuality, $derivedScore, $statusColor] = evaluateSleepQualityMeta($duration);
+    $score = (isset($data["sleep_score"]) && (int)$data["sleep_score"] > 0) ? (int)$data["sleep_score"] : $derivedScore;
+    $quality = $derivedQuality;
+
+    $deep = isset($data["deep_sleep_minutes"]) ? (int)$data["deep_sleep_minutes"] : (int)round($duration * 0.22);
+    $light = isset($data["light_sleep_minutes"]) ? (int)$data["light_sleep_minutes"] : (int)round($duration * 0.55);
+    $rem = isset($data["rem_sleep_minutes"]) ? (int)$data["rem_sleep_minutes"] : (int)round($duration * 0.18);
+    $awake = isset($data["awake_minutes"]) ? (int)$data["awake_minutes"] : (int)round($duration * 0.05);
 
     $stmt = $conn->prepare(
         "INSERT INTO sleep_records (user_id, date_string, duration_minutes, sleep_score, quality_label, bedtime, wake_time, deep_sleep_minutes, light_sleep_minutes, rem_sleep_minutes, awake_minutes)
@@ -156,7 +232,6 @@ if ($method === "POST") {
             $existLog = $logCheck->get_result()->fetch_assoc();
             $logCheck->close();
 
-            $statusColor = ($duration < 360) ? "critical" : (($duration < 480) ? "warning" : "optimal");
             if ($existLog) {
                 $uLog = $conn->prepare("UPDATE sleep_logs SET start_time = ?, end_time = ?, duration_minutes = ?, quality_score = ?, logged_at = ?, bedtime = ?, wake_time = ?, status_color = ?, logged_date = ? WHERE id = ?");
                 $uLog->bind_param("ssiisssssi", $startTime, $endTime, $duration, $score, $dateString, $bedtime, $wakeTime, $statusColor, $dateString, $existLog["id"]);
@@ -177,7 +252,9 @@ if ($method === "POST") {
             "message" => "Sleep record logged successfully",
             "date" => $dateString,
             "duration_minutes" => $duration,
-            "sleep_score" => $score
+            "sleep_score" => $score,
+            "quality" => $quality,
+            "quality_label" => $quality
         ]);
     }
 

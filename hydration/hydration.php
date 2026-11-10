@@ -46,22 +46,31 @@ if ($method === "GET") {
     $glassEquivalent = round($totalConsumed / 250, 1);
     $progressPercent = $targetMl > 0 ? min(100, (int)(($totalConsumed / $targetMl) * 100)) : 0;
 
-    // Weekly history (7 days: Monday to Sunday of the current week based on system date)
-    $dayOfWeek = (int)date("N", strtotime($date));
-    $monday = date("Y-m-d", strtotime($date . " - " . ($dayOfWeek - 1) . " days"));
-    $sunday = date("Y-m-d", strtotime($monday . " + 6 days"));
+    $rawHydPct = ($targetMl > 0) ? (($totalConsumed / $targetMl) * 100.0) : 0.0;
+    $remMl = max(0, $targetMl - $totalConsumed);
+    if ($rawHydPct < 40.0) {
+        $aiSummary = "Water intake is critically low ({$totalConsumed} / {$targetMl} ml, {$remMl} ml remaining). Dehydration can lead to acute mental fatigue, headaches, decreased muscle recovery, and sluggish metabolism. Drink 1–2 glasses immediately to restore fluid balance.";
+    } elseif ($rawHydPct < 75.0) {
+        $aiSummary = "Intake is lagging behind your daily goal ({$totalConsumed} / {$targetMl} ml, {$remMl} ml remaining). Insufficient hydration can trigger false hunger cues, reduce physical endurance, and elevate resting heart rate. Try keeping a water bottle nearby to sip consistently.";
+    } elseif ($rawHydPct < 100.0) {
+        $aiSummary = "You're close to your hydration target ({$totalConsumed} / {$targetMl} ml)! Just {$remMl} ml remaining to ensure optimal electrolyte balance and physical performance.";
+    } else {
+        $aiSummary = "Daily hydration goal achieved ({$totalConsumed} / {$targetMl} ml)! Optimal fluid balance supports muscle recovery and cognitive clarity. Maintain steady intake if working out.";
+    }
+
+    // Rolling 7-day history ending on $date (relative to CURDATE())
+    $rollingStart = date("Y-m-d", strtotime($date . " - 6 days"));
 
     $wStmt = $conn->prepare(
-        "SELECT COALESCE(log_date, logged_date, date_string) as date_string, SUM(COALESCE(volume_ml, amount_ml, intake_ml, 0)) as total_ml 
+        "SELECT DATE(COALESCE(logged_at, log_date, logged_date, date_string, created_at)) as date_string,
+                COALESCE(SUM(COALESCE(volume_ml, amount_ml, intake_ml, 0)), 0) as total_ml 
          FROM hydration_logs 
-         WHERE user_id = ? AND (
-             (date_string BETWEEN ? AND ?) OR 
-             (log_date BETWEEN ? AND ?) OR 
-             (logged_date BETWEEN ? AND ?)
-         ) 
-         GROUP BY COALESCE(log_date, logged_date, date_string)"
+         WHERE user_id = ?
+           AND DATE(COALESCE(logged_at, log_date, logged_date, date_string, created_at)) BETWEEN ? AND ?
+         GROUP BY DATE(COALESCE(logged_at, log_date, logged_date, date_string, created_at))
+         ORDER BY date_string ASC"
     );
-    $wStmt->bind_param("issssss", $userId, $monday, $sunday, $monday, $sunday, $monday, $sunday);
+    $wStmt->bind_param("iss", $userId, $rollingStart, $date);
     $wStmt->execute();
     $wRes = $wStmt->get_result();
     $dailyTotals = [];
@@ -71,25 +80,25 @@ if ($method === "GET") {
     $wStmt->close();
     $conn->close();
 
-    $dayNames = ["M", "T", "W", "T", "F", "S", "S"];
     $weeklyHistory = [];
+    $weeklyTotalMl = 0;
     for ($i = 0; $i < 7; $i++) {
-        $dStr = date("Y-m-d", strtotime($monday . " + $i days"));
+        $dTs = strtotime($rollingStart . " + $i days");
+        $dStr = date("Y-m-d", $dTs);
+        $dayLabel = substr(date("D", $dTs), 0, 1);
         $dConsumed = 0;
-        $hasLog = false;
         if (isset($dailyTotals[$dStr]) && $dailyTotals[$dStr] > 0) {
             $dConsumed = $dailyTotals[$dStr];
-            $hasLog = true;
         } elseif ($dStr === $date && $totalConsumed > 0) {
             $dConsumed = $totalConsumed;
-            $hasLog = true;
         }
+        $weeklyTotalMl += $dConsumed;
 
-        $ratio = ($hasLog && $targetMl > 0) ? min(1.0, round($dConsumed / $targetMl, 2)) : null;
+        $ratio = ($dConsumed > 0 && $targetMl > 0) ? min(1.0, round($dConsumed / $targetMl, 2)) : 0.0;
         $weeklyHistory[] = [
-            "day" => $dayNames[$i],
-            "date" => date("M d", strtotime($dStr)),
-            "consumed_ml" => $hasLog ? $dConsumed : null,
+            "day" => $dayLabel,
+            "date" => date("M d", $dTs),
+            "consumed_ml" => $dConsumed,
             "target_ml" => $targetMl,
             "ratio" => $ratio,
             "is_today" => ($dStr === $today)
@@ -99,11 +108,14 @@ if ($method === "GET") {
     respondJson(200, [
         "success" => true,
         "date" => $date,
+        "ai_summary" => $aiSummary,
         "hydration" => [
             "consumed_ml" => $totalConsumed,
             "target_ml" => $targetMl,
             "glass_equivalent" => $glassEquivalent,
             "progress_percent" => $progressPercent,
+            "weekly_total_ml" => $weeklyTotalMl,
+            "ai_summary" => $aiSummary,
             "reminders_enabled" => $remindersEnabled,
             "logs" => $logs,
             "weekly_history" => $weeklyHistory
@@ -231,6 +243,18 @@ if ($method === "POST") {
         $progressPercent = $targetMl > 0 ? min(100, (int)(($newTotal / $targetMl) * 100)) : 0;
         $glassEquivalent = round($newTotal / 250, 1);
 
+        $rawPostPct = ($targetMl > 0) ? (($newTotal / $targetMl) * 100.0) : 0.0;
+        $remPostMl = max(0, $targetMl - $newTotal);
+        if ($rawPostPct < 40.0) {
+            $postAiSummary = "Water intake is critically low ({$newTotal} / {$targetMl} ml, {$remPostMl} ml remaining). Dehydration can lead to acute mental fatigue, headaches, decreased muscle recovery, and sluggish metabolism. Drink 1–2 glasses immediately to restore fluid balance.";
+        } elseif ($rawPostPct < 75.0) {
+            $postAiSummary = "Intake is lagging behind your daily goal ({$newTotal} / {$targetMl} ml, {$remPostMl} ml remaining). Insufficient hydration can trigger false hunger cues, reduce physical endurance, and elevate resting heart rate. Try keeping a water bottle nearby to sip consistently.";
+        } elseif ($rawPostPct < 100.0) {
+            $postAiSummary = "You're close to your hydration target ({$newTotal} / {$targetMl} ml)! Just {$remPostMl} ml remaining to ensure optimal electrolyte balance and physical performance.";
+        } else {
+            $postAiSummary = "Daily hydration goal achieved ({$newTotal} / {$targetMl} ml)! Optimal fluid balance supports muscle recovery and cognitive clarity. Maintain steady intake if working out.";
+        }
+
         respondJson(201, [
             "success" => true,
             "message" => "+{$amountMl} ml water logged successfully",
@@ -242,7 +266,8 @@ if ($method === "POST") {
             "total_consumed_ml" => $newTotal,
             "target_ml" => $targetMl,
             "glass_equivalent" => $glassEquivalent,
-            "progress_percent" => $progressPercent
+            "progress_percent" => $progressPercent,
+            "ai_summary" => $postAiSummary
         ]);
     }
 

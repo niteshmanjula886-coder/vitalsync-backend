@@ -44,28 +44,55 @@ if ($method === "GET" && !$forceRefresh) {
 // 2. Synthesize Daily Insight using Patient Context & AI Service
 $healthCtx = fetchUserHealthContext($conn, $userId);
 
-$hr = $healthCtx["heart_rate"] ?: 72;
-$steps = $healthCtx["today_steps"] ?: 6420;
-$sleep = $healthCtx["last_sleep_hours"] ?: "7h 25m";
-$sleepScore = $healthCtx["last_sleep_score"] ?: 82;
-$water = $healthCtx["today_water_ml"] ?: 1500;
-$targetWater = $healthCtx["water_target_ml"] ?: 2000;
-$goal = $healthCtx["primary_goal"] ?: "Build Muscle";
+$rawHr = $healthCtx["hr_current"] ?? null;
+$hr = is_numeric($rawHr) && (int)$rawHr > 0 ? (int)$rawHr : null;
+$rawSpo2 = $healthCtx["spo2"] ?? null;
+$spo2Val = (is_string($rawSpo2) && $rawSpo2 !== "NOT_RECORDED" && preg_match('/(\d+)/', $rawSpo2, $mSpo2)) ? (int)$mSpo2[1] : null;
+$steps = (int)($healthCtx["steps_current"] ?? 0);
+$stepGoal = max(1, (int)($healthCtx["steps_target"] ?? 8000));
+$sleep = ($healthCtx["last_sleep_hours"] ?? "NOT_RECORDED") !== "NOT_RECORDED" ? $healthCtx["last_sleep_hours"] : null;
+$sleepScore = $healthCtx["last_sleep_score"] ?? null;
+$water = (int)($healthCtx["water_current_ml"] ?? 0);
+$targetWater = max(1, (int)($healthCtx["water_target_ml"] ?? 2500));
+$goal = $healthCtx["primary_goal"] ?: "General Wellness";
+
+$sleepMins = 0;
+if ($sleep !== null && preg_match('/(\d+)\s*h\s*(?:(\d+)\s*m)?/i', $sleep, $ms)) {
+    $sleepMins = ((int)$ms[1] * 60) + (isset($ms[2]) ? (int)$ms[2] : 0);
+}
+
+$computedScore = max(0, min(100, (int)round(
+    min(35.0, ($steps / (float)$stepGoal) * 35.0) +
+    min(35.0, ($water / (float)$targetWater) * 35.0) +
+    min(30.0, ($sleepMins / 480.0) * 30.0)
+)));
+
+$telemetryLines = [
+    "- Primary Goal: $goal",
+    "- Daily Steps: " . number_format($steps) . " / " . number_format($stepGoal) . " steps",
+    "- Hydration: " . number_format($water) . " / " . number_format($targetWater) . " mL",
+    "- Sleep: " . ($sleep !== null ? $sleep : "Not logged yet")
+];
+if ($hr !== null) $telemetryLines[] = "- Heart Rate: $hr BPM";
+if ($spo2Val !== null) $telemetryLines[] = "- SpO2: $spo2Val%";
+if ($hr === null && $spo2Val === null) {
+    $telemetryLines[] = "- Biometric Sensors: No wearable connected / no readings logged today (omit HR, SpO2, BP; gently suggest pairing a wearable device).";
+}
+$telemetryBlock = implode("\n", $telemetryLines);
 
 $insightPrompt = <<<EOT
-You are VitalSync's Jr. Doctor AI. Generate a concise daily wellness insight for a patient with:
-- Primary Goal: $goal
-- Resting Heart Rate: $hr BPM
-- Daily Steps: $steps steps
-- Last Night's Sleep: $sleep (Quality: $sleepScore/100)
-- Hydration: $water / $targetWater ml
+You are VitalSync's Jr. Doctor AI. Generate a concise 2-3 sentence daily wellness insight for a patient with ONLY these verified metrics:
+$telemetryBlock
 
-Respond in strict JSON with keys:
+Rules:
+- Omit any unmeasured biometric values (if HR/SpO2 are absent, never invent 72 bpm or 98%).
+- Classify sleep strictly as <6.0h Poor, 6.0-7.0h Fair, 7.0-8.5h Optimal, >8.5h Deep / Restorative. Never use "Adequate".
+- Respond in strict JSON with keys:
 {
   "title": "Short catchy title (under 6 words)",
-  "summary": "1-2 sentence medical summary of today's stats",
+  "summary": "2-3 concise sentences of today's real stats",
   "actionable_advice": "1 specific recommendation for the next 6 hours",
-  "wellness_score": integer between 60 and 98
+  "wellness_score": $computedScore
 }
 EOT;
 
@@ -75,10 +102,61 @@ $messages = [
 
 $aiRes = callAiChat($messages, "You are a clinical AI that outputs ONLY strict valid JSON with no markdown wrapping.");
 
-$title = "Activity & Recovery Harmony";
-$summary = "Your resting heart rate is stable at {$hr} BPM, and activity is progressing well with " . number_format($steps) . " steps logged today.";
-$advice = "Hydration is at {$water} ml; drinking an additional glass of water will help maintain optimal cardiac output.";
-$wellnessScore = 86;
+// Build dynamic objective fallback summary
+$summaryClauses = [];
+if ($hr !== null) {
+    if ($hr < 60) $summaryClauses[] = "Resting heart rate is low/athletic at {$hr} BPM.";
+    elseif ($hr <= 100) $summaryClauses[] = "Resting heart rate of {$hr} BPM is in the normal recovery range.";
+    else $summaryClauses[] = "Heart rate is elevated at {$hr} BPM, suggesting strain or fatigue.";
+}
+if ($spo2Val !== null) {
+    $summaryClauses[] = ($spo2Val >= 95) ? "SpO2 is normal at {$spo2Val}%." : "SpO2 is sub-optimal at {$spo2Val}%.";
+}
+$stepsPctRaw = ($steps / (float)$stepGoal) * 100.0;
+$stepsFmt = number_format($steps);
+$stepGoalFmt = number_format($stepGoal);
+if ($stepsPctRaw < 50.0) {
+    $summaryClauses[] = "You have completed {$stepsFmt} of your {$stepGoalFmt} daily step goal. A 20-minute brisk walk will help you close the gap.";
+} elseif ($stepsPctRaw < 100.0) {
+    $remStepsFmt = number_format(max(0, $stepGoal - $steps));
+    $summaryClauses[] = "Good progress! You're only {$remStepsFmt} steps away from hitting your personalized {$stepGoalFmt}-step target.";
+} else {
+    $excessStepsFmt = number_format(max(0, $steps - $stepGoal));
+    $summaryClauses[] = "Target unlocked! You exceeded your {$stepGoalFmt}-step goal by {$excessStepsFmt} steps today.";
+}
+
+if ($sleepMins > 0) {
+    $sleepHrs = $sleepMins / 60.0;
+    if ($sleepHrs < 6.0) $summaryClauses[] = "Sleep quality is Poor at {$sleep}.";
+    elseif ($sleepHrs < 7.0) $summaryClauses[] = "Sleep quality is Fair at {$sleep}.";
+    elseif ($sleepHrs <= 8.5) $summaryClauses[] = "Sleep quality is Optimal at {$sleep}.";
+    else $summaryClauses[] = "Sleep quality is Deep / Restorative at {$sleep}.";
+}
+
+$hydPctRaw = ($water / (float)$targetWater) * 100.0;
+$remWater = max(0, $targetWater - $water);
+$waterFmt = number_format($water);
+$targetWaterFmt = number_format($targetWater);
+$remWaterFmt = number_format($remWater);
+if ($hydPctRaw < 40.0) {
+    $summaryClauses[] = "Water intake is critically low ({$waterFmt} / {$targetWaterFmt} ml). Dehydration can lead to acute mental fatigue, headaches, decreased muscle recovery, and sluggish metabolism.";
+} elseif ($hydPctRaw < 75.0) {
+    $summaryClauses[] = "Intake is lagging behind your daily goal ({$waterFmt} / {$targetWaterFmt} ml). Insufficient hydration can trigger false hunger cues, reduce physical endurance, and elevate resting heart rate.";
+} elseif ($hydPctRaw < 100.0) {
+    $summaryClauses[] = "You're close to your hydration target ({$waterFmt} / {$targetWaterFmt} ml)! Just {$remWaterFmt} ml remaining to ensure optimal electrolyte balance and physical performance.";
+} else {
+    $summaryClauses[] = "Daily hydration goal achieved ({$waterFmt} / {$targetWaterFmt} ml)! Optimal fluid balance supports muscle recovery and cognitive clarity.";
+}
+if ($hr === null && $spo2Val === null) {
+    $summaryClauses[] = "Pair a wearable device to monitor resting heart rate and recovery metrics in real time.";
+}
+
+$title = ($computedScore >= 80) ? "Strong Daily Momentum" : (($hr === null) ? "Activity & Hydration Summary" : "Vitals & Recovery Overview");
+$summary = implode(" ", $summaryClauses);
+$advice = ($hr === null && $spo2Val === null)
+    ? "Pair a wearable device in Settings > Connected Devices to track heart rate and recovery live."
+    : (($hydPctRaw < 40.0) ? "Drink 1–2 glasses immediately to restore fluid balance." : (($hydPctRaw < 75.0) ? "Keep a water bottle nearby to sip consistently." : "Keep steady movement and water intake going through the evening."));
+$wellnessScore = $computedScore;
 $modelUsed = "vitalsync:clinical-engine";
 
 if ($aiRes !== null && !empty($aiRes["text"])) {
@@ -88,13 +166,25 @@ if ($aiRes !== null && !empty($aiRes["text"])) {
     $raw = preg_replace('/```$/', '', $raw);
     $raw = trim($raw);
 
+    $fallbackSummaryCopy = $summary;
     $parsed = json_decode($raw, true);
     if (is_array($parsed) && !empty($parsed["title"])) {
         $title = trim($parsed["title"]);
         if (!empty($parsed["summary"])) $summary = trim($parsed["summary"]);
         if (!empty($parsed["actionable_advice"])) $advice = trim($parsed["actionable_advice"]);
-        if (!empty($parsed["wellness_score"])) $wellnessScore = (int)$parsed["wellness_score"];
         $modelUsed = $aiRes["model"];
+    }
+    if (stripos($summary, "adequate") !== false ||
+        ($sleepMins > 0 && $sleepMins < 420 && stripos($summary, "optimal") !== false) ||
+        ($sleepMins >= 420 && $sleepMins <= 540 && (stripos($summary, "insufficient") !== false || stripos($summary, "poor") !== false)) ||
+        ($hr === null && (stripos($summary, "bpm") !== false || strpos($summary, "72") !== false)) ||
+        ($spo2Val === null && (stripos($summary, "spo2") !== false || strpos($summary, "98%") !== false))) {
+        $summary = $fallbackSummaryCopy;
+    }
+    if ($hr === null && $spo2Val === null &&
+        stripos($summary, "wearable") === false &&
+        stripos($summary, "pair") === false) {
+        $summary = rtrim($summary, ". ") . ". Pair a wearable device to monitor resting heart rate and recovery metrics in real time.";
     }
 }
 

@@ -57,65 +57,90 @@ if (empty($userMessage)) {
 // Connect to MySQL using db_connect.php
 require_once __DIR__ . "/db_connect.php";
 
-if (isset($conn) && ($conn instanceof mysqli)) {
-    $conn->set_charset("utf8mb4");
+if ($conn->connect_error) {
+    http_response_code(500);
+    echo json_encode([
+        "success" => false,
+        "message" => "Database connection error"
+    ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    exit();
 }
+
+$conn->set_charset("utf8mb4");
 
 $latestHeartRate = null;
 $latestSpo2 = null;
 $todayHydrationMl = 0;
 
+$latestHeartRate = null;
+$latestSpo2 = null;
+$todayHydrationMl = 0;
+$targetHydrationMl = 2500;
+
 if (isset($conn) && ($conn instanceof mysqli)) {
-    // 1. Fetch latest heart rate & SpO2 from vitals_logs
+    // 1. Fetch TODAY's heart rate & SpO2 from vitals_logs only (no stale old vitals)
     try {
-        $vStmt = $conn->prepare("SELECT heart_rate, spo2 FROM vitals_logs WHERE user_id = ? AND (heart_rate IS NOT NULL OR spo2 IS NOT NULL) ORDER BY logged_at DESC LIMIT 1");
+        $vStmt = $conn->prepare("SELECT heart_rate, spo2 FROM vitals_logs WHERE user_id = ? AND DATE(logged_at) = CURDATE() AND (heart_rate IS NOT NULL OR spo2 IS NOT NULL) ORDER BY logged_at DESC LIMIT 1");
         if ($vStmt) {
             $vStmt->bind_param("i", $userId);
             $vStmt->execute();
             $vRes = $vStmt->get_result()->fetch_assoc();
             $vStmt->close();
             if ($vRes) {
-                if (!empty($vRes["heart_rate"])) $latestHeartRate = (int)$vRes["heart_rate"];
-                if (!empty($vRes["spo2"])) $latestSpo2 = (int)$vRes["spo2"];
+                if (!empty($vRes["heart_rate"]) && (int)$vRes["heart_rate"] > 0) $latestHeartRate = (int)$vRes["heart_rate"];
+                if (!empty($vRes["spo2"]) && (int)$vRes["spo2"] > 0) $latestSpo2 = (int)$vRes["spo2"];
             }
         }
     } catch (Throwable $e) {
         error_log("Telemetry vitals_logs warning: " . $e->getMessage());
     }
 
-    // Fallback to vitals_readings if needed
+    // Fallback to vitals_readings for TODAY only if needed
     if ($latestHeartRate === null) {
         try {
-            $hrStmt = $conn->prepare("SELECT value_numeric FROM vitals_readings WHERE user_id = ? AND reading_type = 'heart_rate' ORDER BY recorded_at DESC LIMIT 1");
+            $hrStmt = $conn->prepare("SELECT value_numeric FROM vitals_readings WHERE user_id = ? AND reading_type = 'heart_rate' AND DATE(recorded_at) = CURDATE() ORDER BY recorded_at DESC LIMIT 1");
             if ($hrStmt) {
                 $hrStmt->bind_param("i", $userId);
                 $hrStmt->execute();
                 $hrRes = $hrStmt->get_result()->fetch_assoc();
                 $hrStmt->close();
-                if ($hrRes) $latestHeartRate = (int)$hrRes["value_numeric"];
+                if ($hrRes && (float)$hrRes["value_numeric"] > 0) $latestHeartRate = (int)$hrRes["value_numeric"];
             }
         } catch (Throwable $e) {}
     }
 
     if ($latestSpo2 === null) {
         try {
-            $spo2Stmt = $conn->prepare("SELECT value_numeric FROM vitals_readings WHERE user_id = ? AND reading_type = 'spo2' ORDER BY recorded_at DESC LIMIT 1");
+            $spo2Stmt = $conn->prepare("SELECT value_numeric FROM vitals_readings WHERE user_id = ? AND reading_type = 'spo2' AND DATE(recorded_at) = CURDATE() ORDER BY recorded_at DESC LIMIT 1");
             if ($spo2Stmt) {
                 $spo2Stmt->bind_param("i", $userId);
                 $spo2Stmt->execute();
                 $spo2Res = $spo2Stmt->get_result()->fetch_assoc();
                 $spo2Stmt->close();
-                if ($spo2Res) $latestSpo2 = (int)$spo2Res["value_numeric"];
+                if ($spo2Res && (float)$spo2Res["value_numeric"] > 0) $latestSpo2 = (int)$spo2Res["value_numeric"];
             }
         } catch (Throwable $e) {}
     }
 
-    // 2. Fetch today's total hydration
+    // 2. Fetch user's target & today's total hydration
+    try {
+        $tgStmt = $conn->prepare("SELECT daily_target_ml FROM hydration_goals WHERE user_id = ? LIMIT 1");
+        if ($tgStmt) {
+            $tgStmt->bind_param("i", $userId);
+            $tgStmt->execute();
+            $tgRes = $tgStmt->get_result()->fetch_assoc();
+            $tgStmt->close();
+            if ($tgRes && !empty($tgRes["daily_target_ml"])) {
+                $targetHydrationMl = (int)$tgRes["daily_target_ml"];
+            }
+        }
+    } catch (Throwable $e) {}
+
     try {
         $today = date("Y-m-d");
-        $hStmt = $conn->prepare("SELECT COALESCE(SUM(COALESCE(volume_ml, intake_ml, amount_ml, 0)), 0) as total_water FROM hydration_logs WHERE user_id = ? AND (log_date = ? OR logged_date = ? OR DATE(logged_at) = ?)");
+        $hStmt = $conn->prepare("SELECT COALESCE(SUM(COALESCE(volume_ml, intake_ml, amount_ml, 0)), 0) as total_water FROM hydration_logs WHERE user_id = ? AND (log_date = ? OR logged_date = ? OR date_string = ? OR DATE(logged_at) = ? OR DATE(created_at) = ?)");
         if ($hStmt) {
-            $hStmt->bind_param("isss", $userId, $today, $today, $today);
+            $hStmt->bind_param("isssss", $userId, $today, $today, $today, $today, $today);
             $hStmt->execute();
             $hRes = $hStmt->get_result()->fetch_assoc();
             $hStmt->close();
@@ -129,18 +154,27 @@ if (isset($conn) && ($conn instanceof mysqli)) {
 }
 
 // Format system prompt establishing the persona
-$systemPrompt = "You are VitalSync Jr. Doctor, an empathetic and concise AI wellness assistant. Provide actionable, concise health guidance in 2-3 sentences based on available vitals.";
+$systemPrompt = "You are VitalSync Jr. Doctor, an empathetic and concise AI wellness assistant. Provide actionable, concise health guidance in 2-3 sentences based ONLY on available real vitals (never invent biometrics if none were recorded today).";
 
 $telemetryContext = [];
 if ($latestHeartRate !== null) {
-    $telemetryContext[] = "Latest Heart Rate: {$latestHeartRate} bpm";
+    $telemetryContext[] = "Today's Heart Rate: {$latestHeartRate} bpm";
 }
 if ($latestSpo2 !== null) {
-    $telemetryContext[] = "Latest SpO2: {$latestSpo2}%";
+    $telemetryContext[] = "Today's SpO2: {$latestSpo2}%";
 }
-if ($todayHydrationMl > 0) {
-    $telemetryContext[] = "Today's Water Intake: {$todayHydrationMl} mL";
+$hydPct = ($targetHydrationMl > 0) ? (($todayHydrationMl / $targetHydrationMl) * 100.0) : 0.0;
+$hydRemMl = max(0, $targetHydrationMl - $todayHydrationMl);
+if ($hydPct < 40.0) {
+    $hydStatusNote = "Water intake is critically low ({$todayHydrationMl} / {$targetHydrationMl} ml, {$hydRemMl} ml remaining). Dehydration can lead to acute mental fatigue, headaches, decreased muscle recovery, and sluggish metabolism. Drink 1–2 glasses immediately to restore fluid balance.";
+} elseif ($hydPct < 75.0) {
+    $hydStatusNote = "Intake is lagging behind your daily goal ({$todayHydrationMl} / {$targetHydrationMl} ml, {$hydRemMl} ml remaining). Insufficient hydration can trigger false hunger cues, reduce physical endurance, and elevate resting heart rate. Try keeping a water bottle nearby to sip consistently.";
+} elseif ($hydPct < 100.0) {
+    $hydStatusNote = "You're close to your hydration target ({$todayHydrationMl} / {$targetHydrationMl} ml)! Just {$hydRemMl} ml remaining to ensure optimal electrolyte balance and physical performance.";
+} else {
+    $hydStatusNote = "Daily hydration goal achieved ({$todayHydrationMl} / {$targetHydrationMl} ml)! Optimal fluid balance supports muscle recovery and cognitive clarity. Maintain steady intake if working out.";
 }
+$telemetryContext[] = "Today's Water Intake: {$todayHydrationMl} / {$targetHydrationMl} mL — {$hydStatusNote}";
 
 if (!empty($telemetryContext)) {
     $systemPrompt .= "\nPatient Telemetry: " . implode(", ", $telemetryContext) . ".";
@@ -162,14 +196,15 @@ $ollamaPayload = [
     ],
     "stream" => false,
     "options" => [
-        "temperature" => 0.4
+        "temperature" => 0.4,
+        "num_predict" => 180
     ]
 ];
 
 $jsonPayload = json_encode($ollamaPayload, JSON_UNESCAPED_UNICODE);
 $response = false;
 
-// Dispatch cURL POST request to local Ollama server with HTTP stream fallback
+// Dispatch cURL POST request to local Ollama server with strict timeout & HTTP stream fallback
 if (function_exists("curl_init")) {
     $ch = curl_init($ollamaUrl);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
@@ -178,8 +213,8 @@ if (function_exists("curl_init")) {
     curl_setopt($ch, CURLOPT_HTTPHEADER, [
         "Content-Type: application/json; charset=utf-8"
     ]);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 60);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 3);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
 
     $execRes = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -190,19 +225,25 @@ if (function_exists("curl_init")) {
     }
 }
 
-// Resilient fallback using PHP stream context if curl is not loaded or failed
+// Resilient fallback using fast socket reachability check + PHP stream context
 if ($response === false) {
-    $opts = [
-        "http" => [
-            "method" => "POST",
-            "header" => "Content-Type: application/json; charset=utf-8\r\n",
-            "content" => $jsonPayload,
-            "timeout" => 60,
-            "ignore_errors" => true
-        ]
-    ];
-    $context = stream_context_create($opts);
-    $response = @file_get_contents($ollamaUrl, false, $context);
+    $errno = 0;
+    $errstr = "";
+    $sock = @fsockopen("127.0.0.1", 11434, $errno, $errstr, 3);
+    if ($sock) {
+        fclose($sock);
+        $opts = [
+            "http" => [
+                "method" => "POST",
+                "header" => "Content-Type: application/json; charset=utf-8\r\n",
+                "content" => $jsonPayload,
+                "timeout" => 10,
+                "ignore_errors" => true
+            ]
+        ];
+        $context = stream_context_create($opts);
+        $response = @file_get_contents($ollamaUrl, false, $context);
+    }
 }
 
 if ($response === false || empty($response)) {

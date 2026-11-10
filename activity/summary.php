@@ -5,16 +5,44 @@ require_once __DIR__ . "/../config/auth_middleware.php";
 $userId = resolveUserIdOrDie($conn, true);
 $today = date("Y-m-d");
 
-// Get goals
-$goalStmt = $conn->prepare("SELECT daily_step_goal, daily_calorie_goal, daily_active_minutes_goal FROM activity_goals WHERE user_id = ? LIMIT 1");
-$goalStmt->bind_param("i", $userId);
-$goalStmt->execute();
-$goalRow = $goalStmt->get_result()->fetch_assoc();
-$goalStmt->close();
+// Get goals safely across activity_goals and user_health_goals
+$goalRow = null;
+$goalStmt = $conn->prepare("SELECT daily_step_goal, daily_calorie_goal, daily_active_minutes_goal, updated_at FROM activity_goals WHERE user_id = ? LIMIT 1");
+if ($goalStmt) {
+    $goalStmt->bind_param("i", $userId);
+    $goalStmt->execute();
+    $goalRow = $goalStmt->get_result()->fetch_assoc();
+    $goalStmt->close();
+}
 
-$stepGoal = $goalRow ? (int)$goalRow["daily_step_goal"] : 8000;
-$calorieGoal = $goalRow ? (int)$goalRow["daily_calorie_goal"] : 500;
-$activeMinGoal = $goalRow ? (int)$goalRow["daily_active_minutes_goal"] : 45;
+$hgStepGoal = 0;
+$hgUpdatedAt = null;
+$hgGoalStmt = $conn->prepare("SELECT target_steps, target_calories, updated_at FROM user_health_goals WHERE user_id = ? LIMIT 1");
+if ($hgGoalStmt) {
+    $hgGoalStmt->bind_param("i", $userId);
+    $hgGoalStmt->execute();
+    $hgGoalRow = $hgGoalStmt->get_result()->fetch_assoc();
+    $hgGoalStmt->close();
+    if ($hgGoalRow && (int)($hgGoalRow["target_steps"] ?? 0) > 0) {
+        $hgStepGoal = (int)$hgGoalRow["target_steps"];
+        $hgUpdatedAt = $hgGoalRow["updated_at"] ?? null;
+    }
+}
+
+$agStepGoal = ($goalRow && (int)($goalRow["daily_step_goal"] ?? 0) > 0) ? (int)$goalRow["daily_step_goal"] : 0;
+$agUpdatedAt = $goalRow["updated_at"] ?? null;
+if ($agStepGoal > 0 && $hgStepGoal > 0) {
+    $stepGoal = ($hgUpdatedAt !== null && $agUpdatedAt !== null && strtotime($hgUpdatedAt) > strtotime($agUpdatedAt))
+        ? $hgStepGoal : $agStepGoal;
+} elseif ($agStepGoal > 0) {
+    $stepGoal = $agStepGoal;
+} elseif ($hgStepGoal > 0) {
+    $stepGoal = $hgStepGoal;
+} else {
+    $stepGoal = 8000;
+}
+$calorieGoal = ($goalRow && (int)($goalRow["daily_calorie_goal"] ?? 0) > 0) ? (int)$goalRow["daily_calorie_goal"] : 500;
+$activeMinGoal = ($goalRow && (int)($goalRow["daily_active_minutes_goal"] ?? 0) > 0) ? (int)$goalRow["daily_active_minutes_goal"] : 45;
 
 // Aggregate today's sessions (workout_sessions first, fallback to activity_sessions)
 $steps = 0;

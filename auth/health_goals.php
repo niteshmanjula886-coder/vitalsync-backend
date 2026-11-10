@@ -111,13 +111,23 @@ if ($method === "GET") {
     $goalRow = $stmt->get_result()->fetch_assoc();
     $stmt->close();
 
-    // If no row exists, initialize from users or defaults
+    // If no row exists, verify user exists in users before inserting defaults
     if (!$goalRow) {
         $uStmt = $conn->prepare("SELECT primary_goal FROM users WHERE id = ? LIMIT 1");
         $uStmt->bind_param("i", $userId);
         $uStmt->execute();
         $uRow = $uStmt->get_result()->fetch_assoc();
         $uStmt->close();
+
+        if (!$uRow) {
+            $conn->close();
+            respond(404, [
+                "success" => false,
+                "status" => "error",
+                "message" => "User not found"
+            ]);
+        }
+
         $primary = $uRow["primary_goal"] ?? "Improve Fitness";
 
         $insStmt = $conn->prepare("INSERT INTO user_health_goals (user_id, primary_goal) VALUES (?, ?) ON DUPLICATE KEY UPDATE primary_goal = VALUES(primary_goal)");
@@ -143,6 +153,9 @@ if ($method === "GET") {
         }
     }
 
+    $resolvedSteps = (int)($goalRow["target_steps"] ?? 8000);
+    if ($resolvedSteps <= 0) $resolvedSteps = 8000;
+
     respond(200, [
         "success" => true,
         "status" => "success",
@@ -150,10 +163,12 @@ if ($method === "GET") {
         "selected_goal_id" => $selectedId,
         "selected_goal_title" => $currentGoalTitle,
         "primary_goal" => $currentGoalTitle,
+        "step_goal" => $resolvedSteps,
         "goals" => [
             "user_id" => (int)$goalRow["user_id"],
             "primary_goal" => $goalRow["primary_goal"],
-            "target_steps" => (int)$goalRow["target_steps"],
+            "step_goal" => $resolvedSteps,
+            "target_steps" => $resolvedSteps,
             "target_sleep_hours" => (float)$goalRow["target_sleep_hours"],
             "target_water_ml" => (int)$goalRow["target_water_ml"],
             "target_weight_kg" => $goalRow["target_weight_kg"] !== null ? (float)$goalRow["target_weight_kg"] : null,
@@ -196,7 +211,14 @@ if ($method === "POST" || $method === "PUT") {
         }
     }
 
-    $targetSteps = isset($data["target_steps"]) && is_numeric($data["target_steps"]) ? (int)$data["target_steps"] : null;
+    $targetSteps = null;
+    if (isset($data["step_goal"]) && is_numeric($data["step_goal"])) {
+        $targetSteps = (int)$data["step_goal"];
+    } elseif (isset($data["target_steps"]) && is_numeric($data["target_steps"])) {
+        $targetSteps = (int)$data["target_steps"];
+    } elseif (isset($data["daily_step_goal"]) && is_numeric($data["daily_step_goal"])) {
+        $targetSteps = (int)$data["daily_step_goal"];
+    }
     $targetSleepHours = isset($data["target_sleep_hours"]) && is_numeric($data["target_sleep_hours"]) ? (float)$data["target_sleep_hours"] : (isset($data["sleep_hours"]) ? (float)$data["sleep_hours"] : null);
     $targetWaterMl = isset($data["target_water_ml"]) && is_numeric($data["target_water_ml"]) ? (int)$data["target_water_ml"] : (isset($data["water_ml"]) ? (int)$data["water_ml"] : null);
     $targetWeightKg = isset($data["target_weight_kg"]) && is_numeric($data["target_weight_kg"]) ? (float)$data["target_weight_kg"] : (isset($data["weight_kg"]) ? (float)$data["weight_kg"] : null);

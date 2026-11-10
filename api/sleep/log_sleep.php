@@ -42,29 +42,29 @@ if ($durationMinutes <= 0 || $durationMinutes > 1440) {
     ]);
 }
 
-// Prompt requirement: Automatically categorize status
-// `critical` if < 6 hrs (< 360 min)
-// `warning` if 6–8 hrs (360–480 min)
-// `optimal` if >= 8 hrs (>= 480 min)
-$statusColor = "optimal";
-$qualityLabel = "Optimal Sleep";
-
+$sleepHoursVal = $durationMinutes / 60.0;
 if ($durationMinutes < 360) {
     $statusColor = "critical";
-    $qualityLabel = "Insufficient Sleep";
-} elseif ($durationMinutes < 480) {
+    $qualityLabel = "Poor";
+    $sleepScore = max(40, min(55, (int)round(40 + ($sleepHoursVal / 6.0) * 15)));
+} elseif ($durationMinutes < 420) {
     $statusColor = "warning";
-    $qualityLabel = "Fair Sleep";
+    $qualityLabel = "Fair";
+    $sleepScore = max(60, min(74, (int)round(60 + ($sleepHoursVal - 6.0) * 14)));
+} elseif ($durationMinutes <= 510) {
+    $statusColor = "optimal";
+    $qualityLabel = "Optimal";
+    $sleepScore = max(75, min(90, (int)round(75 + (($sleepHoursVal - 7.0) / 1.5) * 15)));
 } else {
     $statusColor = "optimal";
-    $qualityLabel = "Restful Sleep";
+    $qualityLabel = "Excellent";
+    $sleepScore = max(90, min(100, (int)round(90 + min(1.0, ($sleepHoursVal - 8.5) / 1.5) * 10)));
 }
 
 $hours = intdiv($durationMinutes, 60);
 $mins = $durationMinutes % 60;
 $durationFormatted = "{$hours}h {$mins}m";
-$sleepScore = min(100, max(40, (int)round(($durationMinutes / 480.0) * 90)));
-$qualityScore = isset($input["quality_score"]) ? (int)$input["quality_score"] : $sleepScore;
+$qualityScore = (isset($input["quality_score"]) && (int)$input["quality_score"] > 0) ? (int)$input["quality_score"] : $sleepScore;
 
 $startTime = !empty($input["start_time"]) ? trim((string)$input["start_time"]) : date("Y-m-d H:i:s", strtotime("$loggedDate $bedtime"));
 $endTime = !empty($input["end_time"]) ? trim((string)$input["end_time"]) : date("Y-m-d H:i:s", strtotime("$loggedDate $wakeTime"));

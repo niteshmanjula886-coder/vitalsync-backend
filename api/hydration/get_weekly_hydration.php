@@ -18,11 +18,9 @@ $endDateInput = trim($_GET["end_date"] ?? "");
 $today = date("Y-m-d");
 
 if (empty($startDateInput) || empty($endDateInput)) {
-    // Dynamic Monday to Sunday calendar week mapping based on current timestamp
-    $refDate = !empty($endDateInput) ? $endDateInput : $today;
-    $dayOfWeek = (int)date("N", strtotime($refDate)); // 1 (Mon) to 7 (Sun)
-    $startDateInput = date("Y-m-d", strtotime($refDate . " - " . ($dayOfWeek - 1) . " days"));
-    $endDateInput = date("Y-m-d", strtotime($startDateInput . " + 6 days"));
+    // Rolling 7 days ending today (relative to CURDATE())
+    $endDateInput = !empty($endDateInput) ? $endDateInput : $today;
+    $startDateInput = date("Y-m-d", strtotime($endDateInput . " - 6 days"));
 }
 
 // Fetch user's target ml
@@ -38,20 +36,17 @@ if ($tStmt) {
     $tStmt->close();
 }
 
-// Query logged hydration between start_date and end_date
+// Query logged hydration across rolling 7 days
 $stmt = $conn->prepare(
-    "SELECT COALESCE(log_date, logged_date, date_string) as l_date, 
+    "SELECT COALESCE(log_date, logged_date, date_string, DATE(logged_at), DATE(created_at)) as l_date, 
             SUM(COALESCE(volume_ml, intake_ml, amount_ml, 0)) as total_intake,
             MAX(target_ml) as day_target
      FROM hydration_logs 
-     WHERE user_id = ? AND (
-         (log_date BETWEEN ? AND ?) OR 
-         (logged_date BETWEEN ? AND ?) OR 
-         (date_string BETWEEN ? AND ?)
-     )
-     GROUP BY COALESCE(log_date, logged_date, date_string)"
+     WHERE user_id = ?
+       AND COALESCE(log_date, logged_date, date_string, DATE(logged_at), DATE(created_at)) BETWEEN ? AND ?
+     GROUP BY COALESCE(log_date, logged_date, date_string, DATE(logged_at), DATE(created_at))"
 );
-$stmt->bind_param("issssss", $userId, $startDateInput, $endDateInput, $startDateInput, $endDateInput, $startDateInput, $endDateInput);
+$stmt->bind_param("iss", $userId, $startDateInput, $endDateInput);
 $stmt->execute();
 $result = $stmt->get_result();
 
@@ -67,18 +62,16 @@ while ($row = $result->fetch_assoc()) {
 }
 $stmt->close();
 
-// Build continuous Monday to Sunday 7-day array
+// Build continuous rolling 7-day array ending today
 $days = [];
 $totalRecordedMl = 0;
 $loggedDaysCount = 0;
-$dayNamesShort = ["M", "T", "W", "T", "F", "S", "S"];
-$dayNamesFull = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 for ($i = 0; $i < 7; $i++) {
     $currentTs = strtotime($startDateInput . " + $i days");
     $dStr = date("Y-m-d", $currentTs);
-    $dayLabel = $dayNamesShort[$i];
-    $dayName = $dayNamesFull[$i];
+    $dayName = date("D", $currentTs);
+    $dayLabel = substr($dayName, 0, 1);
     $isToday = ($dStr === $today);
 
     if (isset($loggedByDate[$dStr]) && $loggedByDate[$dStr]["intake_ml"] > 0) {
@@ -103,16 +96,16 @@ for ($i = 0; $i < 7; $i++) {
         $totalRecordedMl += $intake;
         $loggedDaysCount++;
     } else {
-        // Return null for unlogged days
+        // Return 0 ml explicitly for unlogged days so rolling volume charts stay complete
         $days[] = [
             "date" => $dStr,
             "date_formatted" => date("M d", $currentTs),
             "day" => $dayLabel,
             "day_name" => $dayName,
-            "intake_ml" => null,
-            "consumed_ml" => null,
+            "intake_ml" => 0,
+            "consumed_ml" => 0,
             "target_ml" => $targetMl,
-            "ratio" => null,
+            "ratio" => 0.0,
             "progress_percent" => 0,
             "has_data" => false,
             "is_today" => $isToday
@@ -120,7 +113,7 @@ for ($i = 0; $i < 7; $i++) {
     }
 }
 
-$avgRecordedMl = $loggedDaysCount > 0 ? (int)round($totalRecordedMl / $loggedDaysCount) : null;
+$avgRecordedMl = $loggedDaysCount > 0 ? (int)round($totalRecordedMl / $loggedDaysCount) : 0;
 
 respondJson(200, [
     "status" => "success",

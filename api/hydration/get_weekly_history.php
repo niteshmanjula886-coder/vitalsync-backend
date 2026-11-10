@@ -102,53 +102,51 @@ try {
         // Fallback intact
     }
 
-    // 2. Query Week-by-Week Aggregated Data for the Past 8 Weeks
-    // Grouping by YEARWEEK(log_date, 1) where Monday is the first day of the week
+    // 2. Query Rolling 7-Day Blocks Relative to CURDATE() for the Past 8 Rolling Weeks
     $query = "
         SELECT 
-            YEARWEEK(log_date, 1) AS week_key,
-            MIN(log_date) AS week_start_date,
-            MAX(log_date) AS week_end_date,
+            FLOOR(DATEDIFF(CURDATE(), log_date) / 7) AS week_bucket,
             COUNT(DISTINCT log_date) AS logged_days,
             SUM(volume_ml) AS total_volume_ml,
             ROUND(AVG(daily_total)) AS avg_daily_ml,
             MAX(daily_total) AS max_single_day_ml
         FROM (
             SELECT 
-                COALESCE(log_date, logged_date, date_string, DATE(logged_at)) AS log_date, 
+                COALESCE(log_date, logged_date, date_string, DATE(logged_at), DATE(created_at)) AS log_date, 
                 SUM(COALESCE(volume_ml, amount_ml, intake_ml, 0)) AS daily_total,
                 SUM(COALESCE(volume_ml, amount_ml, intake_ml, 0)) AS volume_ml
             FROM hydration_logs
             WHERE user_id = :uid 
-              AND COALESCE(log_date, logged_date, date_string, DATE(logged_at)) >= DATE_SUB(CURDATE(), INTERVAL 8 WEEK)
-            GROUP BY COALESCE(log_date, logged_date, date_string, DATE(logged_at))
+              AND COALESCE(log_date, logged_date, date_string, DATE(logged_at), DATE(created_at)) BETWEEN DATE_SUB(CURDATE(), INTERVAL 55 DAY) AND CURDATE()
+            GROUP BY COALESCE(log_date, logged_date, date_string, DATE(logged_at), DATE(created_at))
         ) AS daily_summary
-        GROUP BY YEARWEEK(log_date, 1)
-        ORDER BY week_key DESC
+        WHERE log_date IS NOT NULL
+        GROUP BY week_bucket
+        ORDER BY week_bucket ASC
     ";
 
     $stmt = $pdo->prepare($query);
     $stmt->execute([':uid' => $userId]);
     $weeksRaw = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // 3. Process Weekly Aggregations
+    // 3. Process Rolling 7-Day Aggregations
     $weeklyHistory = [];
     $totalVolume8Weeks = 0;
     $totalDaysLogged8Weeks = 0;
-    $currentYearWeek = (int)date('oW');
 
     foreach ($weeksRaw as $row) {
-        $weekKey = (int)$row['week_key'];
-        $year = (int)substr((string)$weekKey, 0, 4);
-        $weekNum = (int)substr((string)$weekKey, 4);
+        $bucket = max(0, (int)$row['week_bucket']);
+        $endOffset = $bucket * 7;
+        $startOffset = $endOffset + 6;
 
-        // ISO Calendar Monday & Sunday for this week key
-        $mondayTs = strtotime("{$year}W" . str_pad($weekNum, 2, '0', STR_PAD_LEFT) . "1");
-        $sundayTs = strtotime("{$year}W" . str_pad($weekNum, 2, '0', STR_PAD_LEFT) . "7");
+        $startTs = strtotime("-{$startOffset} days");
+        $endTs = strtotime("-{$endOffset} days");
 
-        $weekStart = date('Y-m-d', $mondayTs);
-        $weekEnd = date('Y-m-d', $sundayTs);
-        $weekLabel = date('M d', $mondayTs) . ' - ' . date('M d', $sundayTs);
+        $weekStart = date('Y-m-d', $startTs);
+        $weekEnd = date('Y-m-d', $endTs);
+        $weekLabel = ($bucket === 0)
+            ? 'Last 7 Days (' . date('M d', $startTs) . ' - ' . date('M d', $endTs) . ')'
+            : date('M d', $startTs) . ' - ' . date('M d', $endTs);
 
         $totVol = (int)$row['total_volume_ml'];
         $loggedDays = (int)$row['logged_days'];
@@ -172,9 +170,9 @@ try {
         }
 
         $weeklyHistory[] = [
-            'week_key' => $weekKey,
-            'week_number' => $weekNum,
-            'year' => $year,
+            'week_key' => (int)date('oW', $endTs),
+            'week_number' => (int)date('W', $endTs),
+            'year' => (int)date('o', $endTs),
             'week_label' => $weekLabel,
             'week_start_date' => $weekStart,
             'week_end_date' => $weekEnd,
@@ -187,7 +185,7 @@ try {
             'completion_rate_percent' => $completionPct,
             'daily_target_achievement_percent' => $dailyAchievementPct,
             'status' => $status,
-            'is_current_week' => ($weekKey === $currentYearWeek)
+            'is_current_week' => ($bucket === 0)
         ];
     }
 
@@ -224,37 +222,76 @@ try {
         'consistency_rating' => ($totalDaysLogged8Weeks >= 28) ? 'High' : (($totalDaysLogged8Weeks >= 14) ? 'Moderate' : 'Developing')
     ];
 
-    // 5. Active Hydration Clinical Insight
-    $currAvg = $currentWeek ? $currentWeek['avg_daily_ml'] : $summary['overall_avg_daily_ml'];
-    $completion = $currentWeek ? $currentWeek['completion_rate_percent'] : 0;
-    $trendPctAbs = abs($summary['trend_percentage']);
-
-    $fallbackTitle = "Hydration Performance";
-    $fallbackSummary = "Your daily hydration averages {$currAvg} mL/day, achieving {$completion}% of your {$userGoal} mL daily target.";
-    $fallbackAdvice = "Drink a glass of water upon waking and before workouts to maintain cellular volume and autonomic balance.";
-    $hydrationScore = 80;
-
-    if ($completion >= 85) {
-        $fallbackTitle = "Optimal Hydration Discipline";
-        $fallbackSummary = "You consistently met your hydration goals this week with {$currAvg} mL/day, demonstrating robust fluid retention and recovery pacing.";
-        $fallbackAdvice = "Keep this steady pace; balance with electrolytes on intense training days to maintain peak cellular conductivity.";
-        $hydrationScore = 92;
-    } elseif ($completion >= 60) {
-        $fallbackTitle = "Moderate Fluid Balance";
-        $fallbackSummary = "Your hydration reached {$completion}% of the target volume. Daily average of {$currAvg} mL is steady but has room for consistency.";
-        $fallbackAdvice = "Set mid-afternoon hydration cues to bridge the gap toward your full {$userGoal} mL goal.";
-        $hydrationScore = 78;
-    } else {
-        $fallbackTitle = "Hydration Deficit Detected";
-        $fallbackSummary = "Average fluid intake is currently {$currAvg} mL/day, trailing your target of {$userGoal} mL. Hydration deficit may impact stamina.";
-        $fallbackAdvice = "Increase water intake by 250 mL every 2 hours during daylight hours to safely restore fluid equilibrium.";
-        $hydrationScore = 65;
+    // 5. Rolling 7-Day Daily Breakdown (CURDATE()-6 .. CURDATE(), 0 ml for days with 0 intake, direct sum)
+    $rolling7Stmt = $pdo->prepare("
+        SELECT DATE(COALESCE(logged_at, log_date, logged_date, date_string, created_at)) AS log_day,
+               COALESCE(SUM(COALESCE(volume_ml, amount_ml, intake_ml, 0)), 0) AS day_ml
+        FROM hydration_logs
+        WHERE user_id = :uid
+          AND DATE(COALESCE(logged_at, log_date, logged_date, date_string, created_at)) >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+        GROUP BY DATE(COALESCE(logged_at, log_date, logged_date, date_string, created_at))
+        ORDER BY log_day ASC
+    ");
+    $rolling7Stmt->execute([':uid' => $userId]);
+    $rollingRows = $rolling7Stmt->fetchAll(PDO::FETCH_ASSOC);
+    $rollingMap = [];
+    foreach ($rollingRows as $rr) {
+        if (!empty($rr['log_day'])) {
+            $rollingMap[$rr['log_day']] = (int)$rr['day_ml'];
+        }
     }
 
-    if ($trendDirection === 'increasing') {
-        $fallbackSummary .= " Intake trended upward by +{$trendPctAbs}% compared to last week.";
-    } elseif ($trendDirection === 'decreasing') {
-        $fallbackSummary .= " Intake dipped by -{$trendPctAbs}% compared to the previous week.";
+    $rolling7Days = [];
+    $rolling7SumMl = 0;
+    $rollingLoggedDays = 0;
+    for ($offset = 6; $offset >= 0; $offset--) {
+        $dDate = date('Y-m-d', strtotime("-{$offset} days"));
+        $dMl = isset($rollingMap[$dDate]) ? max(0, (int)$rollingMap[$dDate]) : 0;
+        if ($dMl > 0) $rollingLoggedDays++;
+        $rolling7SumMl += $dMl;
+        $rolling7Days[] = [
+            'date' => $dDate,
+            'day' => date('D', strtotime($dDate)),
+            'intake_ml' => $dMl,
+            'consumed_ml' => $dMl
+        ];
+    }
+
+    // Keep weeklyHistory[0] total_volume_ml synchronized as direct sum of past 7 rolling days
+    if (!empty($weeklyHistory) && !empty($weeklyHistory[0]['is_current_week'])) {
+        $weeklyHistory[0]['total_volume_ml'] = $rolling7SumMl;
+        $weeklyHistory[0]['logged_days'] = $rollingLoggedDays;
+        $weeklyHistory[0]['avg_daily_ml'] = $rollingLoggedDays > 0 ? (int)round($rolling7SumMl / $rollingLoggedDays) : 0;
+        $wkTarget = $userGoal * 7;
+        $weeklyHistory[0]['completion_rate_percent'] = $wkTarget > 0 ? round(($rolling7SumMl / $wkTarget) * 100, 1) : 0;
+    }
+
+    // 6. Dynamic Hydration AI Summary Based on Actual Today's Intake vs Target (with Physiological Consequences)
+    $todayIso = date('Y-m-d');
+    $todayIntakeMl = isset($rollingMap[$todayIso]) ? (int)$rollingMap[$todayIso] : 0;
+    $todayPct = ($userGoal > 0) ? (($todayIntakeMl / $userGoal) * 100.0) : 0.0;
+    $remainingMl = max(0, $userGoal - $todayIntakeMl);
+    $hydrationScore = min(100, max(0, (int)round($todayPct)));
+    $loggedFmt = number_format($todayIntakeMl);
+    $targetFmt = number_format($userGoal);
+    $remFmt = number_format($remainingMl);
+
+    if ($todayPct < 40.0) {
+        $fallbackTitle = "Critically Low Hydration";
+        $fallbackSummary = "Water intake is critically low ({$loggedFmt} / {$targetFmt} ml, {$remFmt} ml remaining). Dehydration can lead to acute mental fatigue, headaches, decreased muscle recovery, and sluggish metabolism. Drink 1\u{2013}2 glasses immediately to restore fluid balance.";
+        $fallbackAdvice = "Drink 1\u{2013}2 glasses (250\u{2013}500 ml) now; {$remFmt} ml left to hit your {$targetFmt} ml target.";
+    } elseif ($todayPct < 75.0) {
+        $fallbackTitle = "Hydration Lagging";
+        $fallbackSummary = "Intake is lagging behind your daily goal ({$loggedFmt} / {$targetFmt} ml, {$remFmt} ml remaining). Insufficient hydration can trigger false hunger cues, reduce physical endurance, and elevate resting heart rate. Try keeping a water bottle nearby to sip consistently.";
+        $fallbackAdvice = "Sip consistently over the next few hours to clear the remaining {$remFmt} ml.";
+    } elseif ($todayPct < 100.0) {
+        $fallbackTitle = "Near Hydration Target";
+        $fallbackSummary = "You're close to your hydration target ({$loggedFmt} / {$targetFmt} ml)! Just {$remFmt} ml remaining to ensure optimal electrolyte balance and physical performance.";
+        $fallbackAdvice = "Only {$remFmt} ml remaining today to hit 100% of your {$targetFmt} ml target.";
+    } else {
+        $fallbackTitle = "Daily Goal Achieved";
+        $fallbackSummary = "Daily hydration goal achieved ({$loggedFmt} / {$targetFmt} ml)! Optimal fluid balance supports muscle recovery and cognitive clarity. Maintain steady intake if working out.";
+        $fallbackAdvice = "Maintain steady hydration if exercising or in warm weather.";
     }
 
     $aiInsight = [
@@ -265,7 +302,7 @@ try {
         'model_used' => 'vitalsync:clinical-engine'
     ];
 
-    // 6. Return standard JSON response
+    // 7. Return standard JSON response
     echo json_encode([
         'status' => 'success',
         'success' => true,
@@ -274,6 +311,8 @@ try {
             'user_id' => $userId,
             'daily_target_ml' => $userGoal,
             'weekly_target_ml' => $userGoal * 7,
+            'rolling_7_day_total_ml' => $rolling7SumMl,
+            'rolling_7_days' => $rolling7Days,
             'weeks_count' => count($weeklyHistory),
             'weekly_history' => $weeklyHistory,
             'weeks' => $weeklyHistory,

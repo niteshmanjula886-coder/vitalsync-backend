@@ -119,16 +119,23 @@ if ($method === "GET") {
 
     $currentGoalTitle = $goalRow["primary_goal"] ?: "Improve Fitness";
 
+    $resolvedStepGoal = (int)($goalRow["target_steps"] ?? 8000);
+    if ($resolvedStepGoal <= 0) {
+        $resolvedStepGoal = 8000;
+    }
+
     respond(200, [
         "success" => true,
         "status" => "success",
         "message" => "Health goals retrieved successfully",
         "primary_goal" => $currentGoalTitle,
         "selected_goal" => $currentGoalTitle,
+        "step_goal" => $resolvedStepGoal,
         "goals" => [
             "user_id" => (int)$goalRow["user_id"],
             "primary_goal" => $currentGoalTitle,
-            "target_steps" => (int)$goalRow["target_steps"],
+            "step_goal" => $resolvedStepGoal,
+            "target_steps" => $resolvedStepGoal,
             "target_sleep_hours" => (float)$goalRow["target_sleep_hours"],
             "target_water_ml" => (int)$goalRow["target_water_ml"],
             "target_weight_kg" => $goalRow["target_weight_kg"] !== null ? (float)$goalRow["target_weight_kg"] : null,
@@ -173,9 +180,24 @@ if ($method === "POST" || $method === "PUT") {
         $primaryGoal = "Improve Fitness";
     }
 
-    // 1. Upsert user_health_goals
-    $stmt = $conn->prepare("INSERT INTO user_health_goals (user_id, primary_goal) VALUES (?, ?) ON DUPLICATE KEY UPDATE primary_goal = VALUES(primary_goal)");
-    $stmt->bind_param("is", $userId, $primaryGoal);
+    $targetSteps = null;
+    if (isset($data["step_goal"]) && is_numeric($data["step_goal"])) {
+        $targetSteps = (int)$data["step_goal"];
+    } elseif (isset($data["target_steps"]) && is_numeric($data["target_steps"])) {
+        $targetSteps = (int)$data["target_steps"];
+    } elseif (isset($data["daily_step_goal"]) && is_numeric($data["daily_step_goal"])) {
+        $targetSteps = (int)$data["daily_step_goal"];
+    }
+
+    // 1. Upsert user_health_goals (preserving target_steps unless explicitly supplied)
+    $stmt = $conn->prepare(
+        "INSERT INTO user_health_goals (user_id, primary_goal, target_steps)
+         VALUES (?, ?, COALESCE(?, 8000))
+         ON DUPLICATE KEY UPDATE
+             primary_goal = VALUES(primary_goal),
+             target_steps = COALESCE(?, target_steps)"
+    );
+    $stmt->bind_param("isii", $userId, $primaryGoal, $targetSteps, $targetSteps);
     if (!$stmt->execute()) {
         $stmt->close();
         $conn->close();
@@ -187,12 +209,47 @@ if ($method === "POST" || $method === "PUT") {
     }
     $stmt->close();
 
-    // 2. Update users table primary_goal
+    // 2. Update users table primary_goal (and step_goal if column exists)
     $uUp = $conn->prepare("UPDATE users SET primary_goal = ? WHERE id = ?");
     if ($uUp) {
         $uUp->bind_param("si", $primaryGoal, $userId);
         $uUp->execute();
         $uUp->close();
+    }
+
+    if ($targetSteps !== null && $targetSteps >= 1000) {
+        try {
+            $ag = $conn->prepare("INSERT INTO activity_goals (user_id, daily_step_goal) VALUES (?, ?) ON DUPLICATE KEY UPDATE daily_step_goal = VALUES(daily_step_goal)");
+            if ($ag) {
+                $ag->bind_param("ii", $userId, $targetSteps);
+                $ag->execute();
+                $ag->close();
+            }
+        } catch (\Throwable $e) {}
+
+        try {
+            $chkCol = $conn->query("SHOW COLUMNS FROM users LIKE 'step_goal'");
+            if ($chkCol && $chkCol->num_rows > 0) {
+                $uStepUp = $conn->prepare("UPDATE users SET step_goal = ? WHERE id = ?");
+                if ($uStepUp) {
+                    $uStepUp->bind_param("ii", $targetSteps, $userId);
+                    $uStepUp->execute();
+                    $uStepUp->close();
+                }
+            }
+        } catch (\Throwable $e) {}
+    }
+
+    $gFetch = $conn->prepare("SELECT target_steps FROM user_health_goals WHERE user_id = ? LIMIT 1");
+    $savedStepGoal = 8000;
+    if ($gFetch) {
+        $gFetch->bind_param("i", $userId);
+        $gFetch->execute();
+        $gRes = $gFetch->get_result()->fetch_assoc();
+        $gFetch->close();
+        if (!empty($gRes["target_steps"]) && (int)$gRes["target_steps"] > 0) {
+            $savedStepGoal = (int)$gRes["target_steps"];
+        }
     }
 
     // Return success response
@@ -202,9 +259,13 @@ if ($method === "POST" || $method === "PUT") {
         "message" => "Health goal updated successfully",
         "primary_goal" => $primaryGoal,
         "selected_goal" => $primaryGoal,
+        "step_goal" => $savedStepGoal,
+        "target_steps" => $savedStepGoal,
         "data" => [
             "user_id" => $userId,
-            "primary_goal" => $primaryGoal
+            "primary_goal" => $primaryGoal,
+            "step_goal" => $savedStepGoal,
+            "target_steps" => $savedStepGoal
         ]
     ]);
 }
