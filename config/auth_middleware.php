@@ -5,7 +5,7 @@ header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Tunnel-Skip-Anti-Abuse");
 
-if ($_SERVER["REQUEST_METHOD"] === "OPTIONS") {
+if (($_SERVER["REQUEST_METHOD"] ?? "") === "OPTIONS") {
     http_response_code(200);
     exit;
 }
@@ -114,5 +114,92 @@ function resolveUserIdOrDie($conn, $allowGuestFallback = false) {
         "success" => false,
         "message" => "Unauthorized: Please provide a valid user_id or email via header, query parameter, or request body"
     ]);
+}
+
+if (!function_exists("evaluateBloodPressure")) {
+    /**
+     * Evaluates systolic/diastolic blood pressure strictly following AHA/ACC cascading priority rules,
+     * checking Hypotension (< 90 / < 60) first before hypertension and optimal bounds.
+     */
+    function evaluateBloodPressure($systolic, $diastolic) {
+        if ($systolic === null || $diastolic === null || (int)$systolic <= 0 || (int)$diastolic <= 0) {
+            return [
+                "status_title" => "No Data",
+                "urgency" => "NORMAL",
+                "tier" => "Optimal",
+                "badge_color" => "#9E9E9E"
+            ];
+        }
+
+        $systolic = (int)$systolic;
+        $diastolic = (int)$diastolic;
+
+        // 1. Hypotension / Low Blood Pressure (Check first to avoid falling into normal)
+        if ($systolic < 90 || $diastolic < 60) {
+            return [
+                "status_title" => "Low Blood Pressure (Hypotension)",
+                "urgency" => ($systolic < 80 || $diastolic < 50) ? "MEDICAL_ATTENTION" : "NEEDS_IMPROVEMENT",
+                "tier" => "Alert",
+                "badge_color" => "#E53935"
+            ];
+        }
+
+        // 2. Hypertensive Crisis (Emergency)
+        if ($systolic >= 180 || $diastolic >= 120) {
+            return [
+                "status_title" => "Hypertensive Crisis",
+                "urgency" => "MEDICAL_ATTENTION",
+                "tier" => "Alert",
+                "badge_color" => "#D32F2F"
+            ];
+        }
+
+        // 3. Stage 2 Hypertension (Sys >= 140 OR Dia >= 90)
+        if ($systolic >= 140 || $diastolic >= 90) {
+            return [
+                "status_title" => "Stage 2 Hypertension",
+                "urgency" => "NEEDS_IMPROVEMENT",
+                "tier" => "Needs Attention",
+                "badge_color" => "#F57C00"
+            ];
+        }
+
+        // 4. Stage 1 Hypertension (Sys 130-139 OR Dia 80-89)
+        if (($systolic >= 130 && $systolic <= 139) || ($diastolic >= 80 && $diastolic <= 89)) {
+            return [
+                "status_title" => "Stage 1 Hypertension",
+                "urgency" => "NEEDS_IMPROVEMENT",
+                "tier" => "Needs Attention",
+                "badge_color" => "#FFA000"
+            ];
+        }
+
+        // 5. Elevated Blood Pressure (Sys 120-129 AND Dia < 80)
+        if ($systolic >= 120 && $systolic <= 129 && $diastolic < 80) {
+            return [
+                "status_title" => "Elevated Blood Pressure",
+                "urgency" => "NORMAL",
+                "tier" => "Needs Attention",
+                "badge_color" => "#FFB300"
+            ];
+        }
+
+        // 6. Optimal / Normal Blood Pressure (Sys 90-119 AND Dia 60-79)
+        if ($systolic >= 90 && $systolic <= 119 && $diastolic >= 60 && $diastolic <= 79) {
+            return [
+                "status_title" => "Optimal Blood Pressure",
+                "urgency" => "NORMAL",
+                "tier" => "Optimal",
+                "badge_color" => "#43A047"
+            ];
+        }
+
+        return [
+            "status_title" => "Normal Blood Pressure",
+            "urgency" => "NORMAL",
+            "tier" => "Optimal",
+            "badge_color" => "#43A047"
+        ];
+    }
 }
 

@@ -1,5 +1,6 @@
 <?php
 
+date_default_timezone_set("Asia/Kolkata");
 require_once __DIR__ . "/../config/auth_middleware.php";
 
 $userId = resolveUserIdOrDie($conn, true);
@@ -25,10 +26,10 @@ $today = date("Y-m-d");
 // 1. Today's Latest Heart Rate (vitals_logs first, fallback to vitals_readings — TODAY only)
 $hrRow = null;
 $hrStmt = $conn->prepare(
-    "SELECT heart_rate as value_numeric, logged_at as recorded_at 
+    "SELECT id, heart_rate as value_numeric, logged_at as recorded_at 
      FROM vitals_logs 
      WHERE user_id = ? AND heart_rate > 0 AND DATE(logged_at) = ?
-     ORDER BY logged_at DESC LIMIT 1"
+     ORDER BY logged_at DESC, id DESC LIMIT 1"
 );
 if ($hrStmt) {
     $hrStmt->bind_param("is", $userId, $today);
@@ -37,12 +38,13 @@ if ($hrStmt) {
     $hrStmt->close();
 }
 
+$hrFromLogs = ($hrRow !== null);
 if (!$hrRow) {
     $hrStmt2 = $conn->prepare(
-        "SELECT value_numeric, status_label, recorded_at 
+        "SELECT id, value_numeric, status_label, recorded_at 
          FROM vitals_readings 
          WHERE user_id = ? AND reading_type = 'heart_rate' AND DATE(recorded_at) = ?
-         ORDER BY recorded_at DESC LIMIT 1"
+         ORDER BY recorded_at DESC, id DESC LIMIT 1"
     );
     if ($hrStmt2) {
         $hrStmt2->bind_param("is", $userId, $today);
@@ -52,8 +54,11 @@ if (!$hrRow) {
     }
 }
 
+$sevenDayStart = date("Y-m-d", strtotime("-6 days"));
+
 if ($hrRow) {
     $curBpm = (int)$hrRow["value_numeric"];
+    $curHrId = (int)$hrRow["id"];
     // Stats for today
     $stRow = null;
     $stStmt = $conn->prepare("SELECT MIN(heart_rate) as min_bpm, MAX(heart_rate) as max_bpm, AVG(heart_rate) as avg_bpm FROM vitals_logs WHERE user_id = ? AND heart_rate > 0 AND DATE(logged_at) = ?");
@@ -64,26 +69,53 @@ if ($hrRow) {
         $stStmt->close();
     }
 
+    // Prior 7-day Heart Rate baseline (excluding latest row when sourced from vitals_logs)
+    $hrTrendText = "Baseline logged";
+    $avg7HrStmt = $conn->prepare(
+        "SELECT AVG(heart_rate) AS avg_7d, COUNT(*) AS cnt
+         FROM vitals_logs
+         WHERE user_id = ? AND heart_rate > 0 AND DATE(logged_at) BETWEEN ? AND ? AND (? = 0 OR id <> ?)"
+    );
+    if ($avg7HrStmt) {
+        $exclId = $hrFromLogs ? $curHrId : 0;
+        $avg7HrStmt->bind_param("issii", $userId, $sevenDayStart, $today, $exclId, $exclId);
+        $avg7HrStmt->execute();
+        $avg7HrRow = $avg7HrStmt->get_result()->fetch_assoc();
+        $avg7HrStmt->close();
+        if ($avg7HrRow && (int)$avg7HrRow["cnt"] > 0 && $avg7HrRow["avg_7d"] !== null) {
+            $diffBpm = $curBpm - (int)round((float)$avg7HrRow["avg_7d"]);
+            if ($diffBpm > 0) {
+                $hrTrendText = "▲ +{$diffBpm} BPM vs 7d avg";
+            } elseif ($diffBpm < 0) {
+                $hrTrendText = "▼ {$diffBpm} BPM vs 7d avg";
+            } else {
+                $hrTrendText = "● On 7d avg";
+            }
+        }
+    }
+
     $minBpm = ($stRow && $stRow["min_bpm"] !== null) ? (int)$stRow["min_bpm"] : $curBpm;
     $maxBpm = ($stRow && $stRow["max_bpm"] !== null) ? (int)$stRow["max_bpm"] : $curBpm;
     $restingBpm = max(45, (int)round($minBpm * 1.02));
 
     $heartRate = [
         "bpm" => $curBpm,
-        "status" => ($curBpm < 60) ? "Low / Athletic" : (($curBpm <= 100) ? "Normal" : "Elevated"),
+        "status" => ($curBpm < 60) ? "Low / Athletic" : (($curBpm <= 100) ? "Normal Resting" : "Elevated"),
         "resting_bpm" => $restingBpm,
         "min_bpm" => $minBpm,
         "max_bpm" => $maxBpm,
+        "trend" => $hrTrendText,
         "recorded_at" => $hrRow["recorded_at"],
         "has_data" => true
     ];
 } else {
     $heartRate = [
         "bpm" => 0,
-        "status" => "No Device Connected",
+        "status" => "Tap to log",
         "resting_bpm" => 0,
         "min_bpm" => 0,
         "max_bpm" => 0,
+        "trend" => "",
         "recorded_at" => "",
         "has_data" => false
     ];
@@ -92,10 +124,10 @@ if ($hrRow) {
 // 2. Today's Latest Blood Pressure
 $bpRow = null;
 $bpStmt = $conn->prepare(
-    "SELECT systolic_bp AS systolic, diastolic_bp AS diastolic, logged_at AS recorded_at 
+    "SELECT id, systolic_bp AS systolic, diastolic_bp AS diastolic, logged_at AS recorded_at 
      FROM vitals_logs 
      WHERE user_id = ? AND systolic_bp > 0 AND DATE(logged_at) = ?
-     ORDER BY logged_at DESC LIMIT 1"
+     ORDER BY logged_at DESC, id DESC LIMIT 1"
 );
 if ($bpStmt) {
     $bpStmt->bind_param("is", $userId, $today);
@@ -104,12 +136,13 @@ if ($bpStmt) {
     $bpStmt->close();
 }
 
+$bpFromLogs = ($bpRow !== null);
 if (!$bpRow) {
     $bpStmt2 = $conn->prepare(
-        "SELECT value_numeric AS systolic, value_secondary AS diastolic, value_text, status_label, recorded_at 
+        "SELECT id, value_numeric AS systolic, value_secondary AS diastolic, value_text, status_label, recorded_at 
          FROM vitals_readings 
          WHERE user_id = ? AND reading_type = 'blood_pressure' AND DATE(recorded_at) = ?
-         ORDER BY recorded_at DESC LIMIT 1"
+         ORDER BY recorded_at DESC, id DESC LIMIT 1"
     );
     if ($bpStmt2) {
         $bpStmt2->bind_param("is", $userId, $today);
@@ -122,12 +155,41 @@ if (!$bpRow) {
 if ($bpRow) {
     $sys = (int)$bpRow["systolic"];
     $dia = (int)$bpRow["diastolic"];
-    $bpStatus = ($sys <= 120 && $dia <= 80) ? "Optimal" : (($sys <= 129 && $dia <= 80) ? "Elevated" : "Hypertension");
+    $curBpId = (int)$bpRow["id"];
+    $bpEval = evaluateBloodPressure($sys, $dia);
+    $bpStatus = $bpEval["status_title"];
+
+    $bpTrendText = "Baseline logged";
+    $avg7BpStmt = $conn->prepare(
+        "SELECT AVG(systolic_bp) AS avg_sys, AVG(diastolic_bp) AS avg_dia, COUNT(*) AS cnt
+         FROM vitals_logs
+         WHERE user_id = ? AND systolic_bp > 0 AND DATE(logged_at) BETWEEN ? AND ? AND (? = 0 OR id <> ?)"
+    );
+    if ($avg7BpStmt) {
+        $exclId = $bpFromLogs ? $curBpId : 0;
+        $avg7BpStmt->bind_param("issii", $userId, $sevenDayStart, $today, $exclId, $exclId);
+        $avg7BpStmt->execute();
+        $avg7BpRow = $avg7BpStmt->get_result()->fetch_assoc();
+        $avg7BpStmt->close();
+        if ($avg7BpRow && (int)$avg7BpRow["cnt"] > 0 && $avg7BpRow["avg_sys"] !== null) {
+            $diffSys = $sys - (int)round((float)$avg7BpRow["avg_sys"]);
+            if ($diffSys > 0) {
+                $bpTrendText = "▲ +{$diffSys} sys vs 7d avg";
+            } elseif ($diffSys < 0) {
+                $bpTrendText = "▼ {$diffSys} sys vs 7d avg";
+            } else {
+                $bpTrendText = "● On 7d avg";
+            }
+        }
+    }
+
     $bloodPressure = [
         "systolic" => $sys,
         "diastolic" => $dia,
         "text" => "$sys/$dia mmHg",
         "status" => $bpStatus,
+        "badge_color" => $bpEval["badge_color"],
+        "trend" => $bpTrendText,
         "recorded_at" => $bpRow["recorded_at"],
         "has_data" => true
     ];
@@ -135,8 +197,9 @@ if ($bpRow) {
     $bloodPressure = [
         "systolic" => 0,
         "diastolic" => 0,
-        "text" => "--/--",
-        "status" => "No Device Connected",
+        "text" => "--/-- mmHg",
+        "status" => "Tap to log",
+        "trend" => "",
         "recorded_at" => "",
         "has_data" => false
     ];
@@ -145,10 +208,10 @@ if ($bpRow) {
 // 3. Today's Latest SpO2
 $spo2Row = null;
 $spo2Stmt = $conn->prepare(
-    "SELECT spo2 as value_numeric, logged_at as recorded_at 
+    "SELECT id, spo2 as value_numeric, logged_at as recorded_at 
      FROM vitals_logs 
      WHERE user_id = ? AND spo2 > 0 AND DATE(logged_at) = ?
-     ORDER BY logged_at DESC LIMIT 1"
+     ORDER BY logged_at DESC, id DESC LIMIT 1"
 );
 if ($spo2Stmt) {
     $spo2Stmt->bind_param("is", $userId, $today);
@@ -157,12 +220,13 @@ if ($spo2Stmt) {
     $spo2Stmt->close();
 }
 
+$spo2FromLogs = ($spo2Row !== null);
 if (!$spo2Row) {
     $spo2Stmt2 = $conn->prepare(
-        "SELECT value_numeric, status_label, recorded_at 
+        "SELECT id, value_numeric, status_label, recorded_at 
          FROM vitals_readings 
          WHERE user_id = ? AND reading_type = 'spo2' AND DATE(recorded_at) = ?
-         ORDER BY recorded_at DESC LIMIT 1"
+         ORDER BY recorded_at DESC, id DESC LIMIT 1"
     );
     if ($spo2Stmt2) {
         $spo2Stmt2->bind_param("is", $userId, $today);
@@ -174,17 +238,45 @@ if (!$spo2Row) {
 
 if ($spo2Row) {
     $pct = (int)$spo2Row["value_numeric"];
-    $spo2Status = ($pct >= 95) ? "Optimal" : (($pct >= 90) ? "Moderate" : "Low");
+    $curSpo2Id = (int)$spo2Row["id"];
+    $spo2Status = ($pct >= 95) ? "Normal ({$pct}%)" : (($pct >= 90) ? "Mild Hypoxia" : "Low SpO2");
+
+    $spo2TrendText = "Baseline logged";
+    $avg7Spo2Stmt = $conn->prepare(
+        "SELECT AVG(spo2) AS avg_spo2, COUNT(*) AS cnt
+         FROM vitals_logs
+         WHERE user_id = ? AND spo2 > 0 AND DATE(logged_at) BETWEEN ? AND ? AND (? = 0 OR id <> ?)"
+    );
+    if ($avg7Spo2Stmt) {
+        $exclId = $spo2FromLogs ? $curSpo2Id : 0;
+        $avg7Spo2Stmt->bind_param("issii", $userId, $sevenDayStart, $today, $exclId, $exclId);
+        $avg7Spo2Stmt->execute();
+        $avg7Spo2Row = $avg7Spo2Stmt->get_result()->fetch_assoc();
+        $avg7Spo2Stmt->close();
+        if ($avg7Spo2Row && (int)$avg7Spo2Row["cnt"] > 0 && $avg7Spo2Row["avg_spo2"] !== null) {
+            $diffSpo2 = $pct - (int)round((float)$avg7Spo2Row["avg_spo2"]);
+            if ($diffSpo2 > 0) {
+                $spo2TrendText = "▲ +{$diffSpo2}% vs 7d avg";
+            } elseif ($diffSpo2 < 0) {
+                $spo2TrendText = "▼ {$diffSpo2}% vs 7d avg";
+            } else {
+                $spo2TrendText = "● On 7d avg";
+            }
+        }
+    }
+
     $spo2 = [
         "percentage" => $pct,
         "status" => $spo2Status,
+        "trend" => $spo2TrendText,
         "recorded_at" => $spo2Row["recorded_at"],
         "has_data" => true
     ];
 } else {
     $spo2 = [
         "percentage" => 0,
-        "status" => "No Device Connected",
+        "status" => "Tap to log",
+        "trend" => "",
         "recorded_at" => "",
         "has_data" => false
     ];

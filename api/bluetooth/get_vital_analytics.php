@@ -195,7 +195,7 @@ if ($lowestBpm !== null && $averageBpm !== null) {
 }
 
 // 4. Dynamic Contextual AI Insight
-$aiInsight = "No readings recorded this week. Wear your smartwatch to track baseline trends.";
+$aiInsight = "No readings recorded this week. Tap '+ Log Vitals' to track baseline trends.";
 if ($totalBpmCount > 0 || $currentBpm !== null) {
     if ($averageBpm !== null && $averageBpm > 95) {
         $aiInsight = "Higher average heart rate observed over the last 48 hours compared to your resting baseline.";

@@ -1,11 +1,31 @@
 <?php
 
+ini_set("display_errors", "0");
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Tunnel-Skip-Anti-Abuse");
 header("Access-Control-Allow-Methods: POST, OPTIONS");
 header("Content-Type: application/json; charset=utf-8");
 
 date_default_timezone_set("Asia/Kolkata");
+
+// Guarantee JSON output if a fatal error interrupts execution before response emission
+register_shutdown_function(function () {
+    $err = error_get_last();
+    if ($err !== null && in_array($err["type"], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR], true)) {
+        if (!headers_sent()) {
+            http_response_code(500);
+            header("Content-Type: application/json; charset=utf-8");
+        }
+        error_log("VitalSync chat_ai fatal error: " . $err["message"]);
+        echo json_encode([
+            "success" => false,
+            "status" => "error",
+            "error" => "Backend PHP fatal error: " . $err["message"],
+            "message" => "Internal backend error occurred. Please check server logs.",
+            "reply" => "VitalSync backend encountered an error while processing your request."
+        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    }
+});
 
 if ($_SERVER["REQUEST_METHOD"] === "OPTIONS") {
     http_response_code(200);
@@ -65,14 +85,31 @@ if (empty($userMessage)) {
 }
 
 // Connect to MySQL using db_connect.php (also initializes ai_chat_sessions / session_id schema)
-require_once __DIR__ . "/db_connect.php";
-require_once __DIR__ . "/ai/ai_service.php";
-
-if ($conn->connect_error) {
+try {
+    require_once __DIR__ . "/db_connect.php";
+    require_once __DIR__ . "/ai/ai_service.php";
+} catch (Throwable $e) {
+    error_log("VitalSync chat_ai DB bootstrap failure: " . $e->getMessage());
     http_response_code(500);
     echo json_encode([
         "success" => false,
-        "message" => "Database connection error"
+        "status" => "error",
+        "error" => "Database connection failed: " . $e->getMessage(),
+        "message" => "Database connection error",
+        "reply" => "VitalSync database is temporarily unavailable. Please verify MySQL is running."
+    ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    exit();
+}
+
+if (!isset($conn) || !($conn instanceof mysqli) || $conn->connect_error) {
+    $dbErr = (isset($conn) && ($conn instanceof mysqli)) ? $conn->connect_error : "MySQLi connection not initialized";
+    http_response_code(500);
+    echo json_encode([
+        "success" => false,
+        "status" => "error",
+        "error" => "Database connection error: " . $dbErr,
+        "message" => "Database connection error",
+        "reply" => "VitalSync database is temporarily unavailable. Please verify MySQL is running."
     ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     exit();
 }
@@ -308,10 +345,10 @@ $ollamaMessages[] = [
 ];
 
 /**
- * Dispatches an HTTP POST JSON request to the local Ollama server via cURL,
- * falling back to native PHP HTTP streams when php_curl is unavailable in Apache.
+ * Dispatches an HTTP POST JSON request to the local Ollama server via cURL (connect timeout 10s,
+ * request timeout 60s), falling back to native PHP HTTP streams when php_curl is unavailable in Apache.
  */
-function dispatchOllamaChatRequest(string $url, array $payload, int $timeoutSeconds = 13): array {
+function dispatchOllamaChatRequest(string $url, array $payload, int $timeoutSeconds = 60): array {
     $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
     if ($jsonPayload === false) {
         return ["ok" => false, "http_code" => 0, "data" => null, "error" => "JSON encode failed: " . json_last_error_msg()];
@@ -329,12 +366,14 @@ function dispatchOllamaChatRequest(string $url, array $payload, int $timeoutSeco
         curl_setopt($ch, CURLOPT_HTTPHEADER, [
             "Content-Type: application/json; charset=utf-8"
         ]);
-        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 3);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
         curl_setopt($ch, CURLOPT_TIMEOUT, $timeoutSeconds);
 
         $execRes = curl_exec($ch);
+        if (curl_errno($ch)) {
+            $transportError = curl_error($ch);
+        }
         $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $transportError = curl_error($ch);
         curl_close($ch);
     } elseif (filter_var(ini_get("allow_url_fopen"), FILTER_VALIDATE_BOOLEAN) || ini_get("allow_url_fopen") == "1") {
         $context = stream_context_create([
@@ -360,7 +399,7 @@ function dispatchOllamaChatRequest(string $url, array $payload, int $timeoutSeco
         return ["ok" => false, "http_code" => 0, "data" => null, "error" => "Neither cURL nor allow_url_fopen is available"];
     }
 
-    if ($execRes === false || $httpCode !== 200) {
+    if ($execRes === false || $transportError !== "" || $httpCode !== 200) {
         return [
             "ok" => false,
             "http_code" => $httpCode,
@@ -390,7 +429,7 @@ $ollamaPayload = [
     ]
 ];
 
-$ollamaResult = dispatchOllamaChatRequest($ollamaUrl, $ollamaPayload, 13);
+$ollamaResult = dispatchOllamaChatRequest($ollamaUrl, $ollamaPayload, 60);
 $ollamaData = $ollamaResult["data"];
 $reply = $ollamaResult["ok"]
     ? ($ollamaData["message"]["content"] ?? $ollamaData["response"] ?? null)
@@ -398,14 +437,16 @@ $reply = $ollamaResult["ok"]
 $modelUsed = "qwen2.5:1.5b";
 
 if (empty($reply) || trim((string)$reply) === "") {
-    error_log("VitalSync chat_ai Ollama error: " . ($ollamaResult["error"] ?: "Empty response payload"));
-    $errMsg = "VitalSync AI engine is currently unreachable. Please verify Ollama is running.";
+    $error_msg = $ollamaResult["error"] ?: "Empty response payload";
+    error_log("VitalSync chat_ai Ollama error: " . $error_msg);
+    $errReply = "VitalSync AI engine is unreachable. Please verify Ollama is active on the host machine.";
     http_response_code(200);
     echo json_encode([
         "success" => false,
         "status" => "error",
-        "message" => $errMsg,
-        "reply" => $errMsg,
+        "error" => "Cannot reach local Ollama instance on port 11434: " . $error_msg,
+        "message" => $errReply,
+        "reply" => $errReply,
         "session_id" => $sessionId > 0 ? $sessionId : null,
         "session_title" => $sessionTitle
     ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);

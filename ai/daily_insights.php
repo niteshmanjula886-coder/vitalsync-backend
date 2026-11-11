@@ -76,7 +76,7 @@ $telemetryLines = [
 if ($hr !== null) $telemetryLines[] = "- Heart Rate: $hr BPM";
 if ($spo2Val !== null) $telemetryLines[] = "- SpO2: $spo2Val%";
 if ($hr === null && $spo2Val === null) {
-    $telemetryLines[] = "- Biometric Sensors: No wearable connected / no readings logged today (omit HR, SpO2, BP; gently suggest pairing a wearable device).";
+    $telemetryLines[] = "- Manual Vitals: No readings logged today (omit HR, SpO2, BP; gently suggest tapping '+ Log Vitals').";
 }
 $telemetryBlock = implode("\n", $telemetryLines);
 
@@ -148,13 +148,13 @@ if ($hydPctRaw < 40.0) {
     $summaryClauses[] = "Daily hydration goal achieved ({$waterFmt} / {$targetWaterFmt} ml)! Optimal fluid balance supports muscle recovery and cognitive clarity.";
 }
 if ($hr === null && $spo2Val === null) {
-    $summaryClauses[] = "Pair a wearable device to monitor resting heart rate and recovery metrics in real time.";
+    $summaryClauses[] = "Tap '+ Log Vitals' on your home dashboard to record Heart Rate, SpO2, or Blood Pressure.";
 }
 
 $title = ($computedScore >= 80) ? "Strong Daily Momentum" : (($hr === null) ? "Activity & Hydration Summary" : "Vitals & Recovery Overview");
 $summary = implode(" ", $summaryClauses);
 $advice = ($hr === null && $spo2Val === null)
-    ? "Pair a wearable device in Settings > Connected Devices to track heart rate and recovery live."
+    ? "Tap '+ Log Vitals' on Home to record Heart Rate, SpO2, and Blood Pressure for complete insights."
     : (($hydPctRaw < 40.0) ? "Drink 1–2 glasses immediately to restore fluid balance." : (($hydPctRaw < 75.0) ? "Keep a water bottle nearby to sip consistently." : "Keep steady movement and water intake going through the evening."));
 $wellnessScore = $computedScore;
 $modelUsed = "vitalsync:clinical-engine";
@@ -175,16 +175,14 @@ if ($aiRes !== null && !empty($aiRes["text"])) {
         $modelUsed = $aiRes["model"];
     }
     if (stripos($summary, "adequate") !== false ||
+        stripos($summary, "bluetooth") !== false ||
+        stripos($summary, "smartwatch") !== false ||
+        stripos($summary, "wearable") !== false ||
         ($sleepMins > 0 && $sleepMins < 420 && stripos($summary, "optimal") !== false) ||
         ($sleepMins >= 420 && $sleepMins <= 540 && (stripos($summary, "insufficient") !== false || stripos($summary, "poor") !== false)) ||
         ($hr === null && (stripos($summary, "bpm") !== false || strpos($summary, "72") !== false)) ||
         ($spo2Val === null && (stripos($summary, "spo2") !== false || strpos($summary, "98%") !== false))) {
         $summary = $fallbackSummaryCopy;
-    }
-    if ($hr === null && $spo2Val === null &&
-        stripos($summary, "wearable") === false &&
-        stripos($summary, "pair") === false) {
-        $summary = rtrim($summary, ". ") . ". Pair a wearable device to monitor resting heart rate and recovery metrics in real time.";
     }
 }
 

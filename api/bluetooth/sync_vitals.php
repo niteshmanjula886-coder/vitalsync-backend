@@ -182,7 +182,8 @@ try {
 
         // Sync BP into vitals_readings
         if ($sys !== null && $dia !== null) {
-            $bpStatus = ($sys <= 120 && $dia <= 80) ? "Optimal" : (($sys <= 129 && $dia <= 80) ? "Elevated" : "Hypertension");
+            $bpEval = evaluateBloodPressure($sys, $dia);
+            $bpStatus = $bpEval["status_title"];
             $vrStmt->execute([
                 ":user_id" => $userId,
                 ":type" => "blood_pressure",

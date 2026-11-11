@@ -693,10 +693,9 @@ You are VitalSync AI, a concise wellness coach. Provide complete, well-rounded a
 ### CORE CLINICAL & BEHAVIORAL RULES:
 1. NLP Tolerance:
    Seamlessly infer and understand the user's intent despite broken grammar, spelling typos, abbreviations, or shorthand without pointing them out. Never critique or correct the user's phrasing.
-2. Hardware Disconnection Check:
-   If any requested or relevant vital (Heart Rate, Blood Pressure, SpO2) is marked "NOT_RECORDED", you MUST explicitly instruct the user:
-   "Your [metric] has not been recorded yet. Please connect your compatible smartwatch or health tracker via Settings > Connected Devices to enable live monitoring."
-   (Example: If Heart Rate is NOT_RECORDED and the user asks about their heart rate, reply: "Your Heart Rate has not been recorded yet. Please connect your compatible smartwatch or health tracker via Settings > Connected Devices to enable live monitoring.")
+2. Missing Vitals Check:
+   If any requested or relevant vital (Heart Rate, Blood Pressure, SpO2) is marked "NOT_RECORDED", tell the user concisely:
+   "Your [metric] has not been recorded today. Tap '+ Log Vitals' on the Home screen to log your latest reading."
 3. BMI & Weight Guidance:
    If the user's BMI is between 25.0 and 29.9, clearly state that it falls into the overweight category. Do not give false flattery. Suggest an actionable 300–400 kcal deficit, daily brisk walking, and adequate protein intake.
 4. Activity Analysis:
@@ -760,17 +759,17 @@ function generateIntelligentFallbackReply($userText, array $ctx, array $ragArtic
         return "⚠️ **Urgent Medical Alert**: Please stop what you're doing right now and seek immediate clinical or emergency assistance.{$hrNotice} Severe symptoms like chest pressure or acute shortness of breath require immediate physician evaluation.";
     }
 
-    // 2. Hardware Disconnection Checks (Rule: Missing or NOT_RECORDED)
+    // 2. Unlogged Vitals Checks (Rule: Missing or NOT_RECORDED)
     if (preg_match('/\b(heart|rate|bpm|pulse)\b/i', $low) && $ctx["hr_current"] === "NOT_RECORDED") {
-        return "Your Heart Rate has not been recorded yet. Please connect your compatible smartwatch or health tracker via Settings > Connected Devices to enable live monitoring.";
+        return "Your Heart Rate has not been logged today. Tap '+ Log Vitals' on the Home screen to record your latest reading.";
     }
 
     if (preg_match('/\b(blood pressure|bp|systolic|diastolic)\b/i', $low) && $ctx["blood_pressure"] === "NOT_RECORDED") {
-        return "Your Blood Pressure has not been recorded yet. Please connect your compatible smartwatch or health tracker via Settings > Connected Devices to enable live monitoring.";
+        return "Your Blood Pressure has not been logged today. Tap '+ Log Vitals' on the Home screen to record your latest reading.";
     }
 
     if (preg_match('/\b(spo2|oxygen|saturation|o2)\b/i', $low) && $ctx["spo2"] === "NOT_RECORDED") {
-        return "Your SpO2 has not been recorded yet. Please connect your compatible smartwatch or health tracker via Settings > Connected Devices to enable live monitoring.";
+        return "Your SpO2 has not been logged today. Tap '+ Log Vitals' on the Home screen to record your latest reading.";
     }
 
     // 3. BMI & Weight Guidance (Rule: BMI between 25.0 and 29.9 -> Overweight guidance)
@@ -837,7 +836,7 @@ function generateIntelligentFallbackReply($userText, array $ctx, array $ragArtic
                "• **Heart Rate**: {$hrDisplay}\n" .
                "• **Blood Pressure**: {$bpDisplay}\n" .
                "• **SpO2**: {$spo2Display}\n\n" .
-               ($hrDisplay === "NOT_RECORDED" ? "Notice: Your Heart Rate has not been recorded yet. Please connect your compatible smartwatch or health tracker via Settings > Connected Devices to enable live monitoring." : "Your vitals are tracking steadily.");
+               ($hrDisplay === "NOT_RECORDED" ? "Tip: Tap '+ Log Vitals' on Home to log your Heart Rate, SpO2, or Blood Pressure today." : "Your vitals are tracking steadily.");
     }
 
     // 8. RAG Knowledge Base Retrieval Fallback

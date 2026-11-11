@@ -131,7 +131,8 @@ if (!$bpRow) {
     if ($bpRow2) {
         $sys = (int)$bpRow2["value_numeric"];
         $dia = (int)$bpRow2["value_secondary"];
-        $status = $bpRow2["status_label"] ?: (($sys <= 120 && $dia <= 80) ? "Optimal" : "Elevated");
+        $bpEval = evaluateBloodPressure($sys, $dia);
+        $status = $bpEval["status_title"];
         $bpData = [
             "systolic" => $sys,
             "diastolic" => $dia,
@@ -140,12 +141,13 @@ if (!$bpRow) {
             "logged_at" => $bpRow2["recorded_at"]
         ];
         $hasAnyLog = true;
-        $scoreComponents["bp"] = ($sys <= 120 && $dia <= 80) ? 100 : (($sys <= 130 && $dia <= 85) ? 80 : 60);
+        $scoreComponents["bp"] = ($bpEval["tier"] === "Optimal") ? 100 : (($bpEval["tier"] === "Alert") ? 25 : (($bpEval["urgency"] === "NEEDS_IMPROVEMENT") ? 55 : 80));
     }
 } else {
     $sys = (int)$bpRow["systolic_bp"];
     $dia = (int)$bpRow["diastolic_bp"];
-    $status = ($sys <= 120 && $dia <= 80) ? "Optimal" : (($sys <= 129 && $dia <= 80) ? "Elevated" : "Hypertension");
+    $bpEval = evaluateBloodPressure($sys, $dia);
+    $status = $bpEval["status_title"];
     $bpData = [
         "systolic" => $sys,
         "diastolic" => $dia,
@@ -154,7 +156,7 @@ if (!$bpRow) {
         "logged_at" => $bpRow["logged_at"]
     ];
     $hasAnyLog = true;
-    $scoreComponents["bp"] = ($sys <= 120 && $dia <= 80) ? 100 : (($sys <= 130 && $dia <= 85) ? 80 : 60);
+    $scoreComponents["bp"] = ($bpEval["tier"] === "Optimal") ? 100 : (($bpEval["tier"] === "Alert") ? 25 : (($bpEval["urgency"] === "NEEDS_IMPROVEMENT") ? 55 : 80));
 }
 
 // 4. Fetch today's Steps Summary

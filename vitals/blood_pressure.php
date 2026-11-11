@@ -20,7 +20,8 @@ if ($method === "GET") {
     while ($r = $result->fetch_assoc()) {
         $sys = (int)$r["systolic"];
         $dia = (int)$r["diastolic"];
-        $status = ($sys <= 120 && $dia <= 80) ? "Optimal" : (($sys <= 129 && $dia <= 80) ? "Elevated" : "Hypertension");
+        $bpEval = evaluateBloodPressure($sys, $dia);
+        $status = $bpEval["status_title"];
         $history[] = [
             "id" => (int)$r["id"],
             "systolic" => $sys,
@@ -45,12 +46,15 @@ if ($method === "GET") {
         $stmt2->execute();
         $res2 = $stmt2->get_result();
         while ($r2 = $res2->fetch_assoc()) {
+            $sys2 = (int)$r2["systolic"];
+            $dia2 = (int)$r2["diastolic"];
+            $bpEval2 = evaluateBloodPressure($sys2, $dia2);
             $history[] = [
                 "id" => (int)$r2["id"],
-                "systolic" => (int)$r2["systolic"],
-                "diastolic" => (int)$r2["diastolic"],
-                "formatted" => $r2["value_text"] ?: ($r2["systolic"] . "/" . $r2["diastolic"] . " mmHg"),
-                "status" => $r2["status_label"],
+                "systolic" => $sys2,
+                "diastolic" => $dia2,
+                "formatted" => $r2["value_text"] ?: ($sys2 . "/" . $dia2 . " mmHg"),
+                "status" => $bpEval2["status_title"],
                 "source" => $r2["source"],
                 "recorded_at" => $r2["recorded_at"]
             ];
@@ -89,13 +93,8 @@ if ($method === "POST") {
         ]);
     }
 
-    if ($systolic <= 120 && $diastolic <= 80) {
-        $status = "Normal";
-    } elseif ($systolic <= 129 && $diastolic <= 80) {
-        $status = "Elevated";
-    } else {
-        $status = "Hypertension";
-    }
+    $bpEval = evaluateBloodPressure($systolic, $diastolic);
+    $status = $bpEval["status_title"];
 
     $text = "$systolic/$diastolic mmHg";
     $unit = "mmHg";

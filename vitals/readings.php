@@ -89,9 +89,8 @@ if ($method === "POST") {
         if ($unit === "") $unit = "mmHg";
         if ($valText === "" && $valNum !== null && $valSec !== null) $valText = ((int)$valNum) . "/" . ((int)$valSec) . " mmHg";
         if ($valNum !== null && $valSec !== null) {
-            if ($valNum < 120 && $valSec < 80) $statusLabel = "Normal";
-            elseif ($valNum <= 129 && $valSec < 80) $statusLabel = "Elevated";
-            else $statusLabel = "Hypertension";
+            $bpEval = evaluateBloodPressure((int)$valNum, (int)$valSec);
+            $statusLabel = $bpEval["status_title"];
         }
     } elseif ($type === "spo2") {
         if ($unit === "") $unit = "%";
