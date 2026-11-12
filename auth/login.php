@@ -7,6 +7,7 @@ header("Content-Type: application/json; charset=UTF-8");
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit(); }
 
 require_once __DIR__ . "/../config/db.php";
+require_once __DIR__ . "/../config/url_helper.php";
 
 // Allow POST requests only
 if ($_SERVER["REQUEST_METHOD"] !== "POST") {
@@ -67,6 +68,7 @@ if (
 try {
     if (!isset($conn) || !($conn instanceof mysqli)) {
         require_once __DIR__ . "/../config/db.php";
+require_once __DIR__ . "/../config/url_helper.php";
     }
 
     // Find user account
@@ -258,8 +260,8 @@ try {
     $host = $_SERVER["HTTP_HOST"] ?? "localhost";
     $baseUrl = $scheme . "://" . $host . "/vitalsync-backend/";
 
-    $rawAvatar = !empty($userProfile["avatar_url"]) ? $userProfile["avatar_url"] : $user["profile_image"];
-    $avatarUrl = !empty($rawAvatar) ? (preg_match('#^https?://#i', $rawAvatar) ? $rawAvatar : $baseUrl . ltrim($rawAvatar, "/")) : null;
+    $rawAvatar = !empty($user["profile_image"]) ? $user["profile_image"] : ($userProfile["avatar_url"] ?? null);
+    $avatarUrl = resolveAvatarUrl($rawAvatar);
 
     // Return full bundle
     http_response_code(200);
@@ -281,6 +283,7 @@ try {
             "activity_level" => $user["activity_level"],
             "primary_goal" => $userGoals["primary_goal"] ?: ($user["primary_goal"] ?? "Improve Fitness"),
             "profile_image" => $user["profile_image"],
+            "profile_image_url" => $avatarUrl,
             "image_url" => $avatarUrl,
             "avatar_url" => $avatarUrl,
             "created_at" => $user["created_at"],

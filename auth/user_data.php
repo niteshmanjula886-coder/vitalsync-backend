@@ -11,6 +11,7 @@ if ($_SERVER["REQUEST_METHOD"] === "OPTIONS") {
 }
 
 require_once __DIR__ . "/../config/db.php";
+require_once __DIR__ . "/../config/url_helper.php";
 
 $userId = isset($_GET["user_id"]) && is_numeric($_GET["user_id"]) ? (int)$_GET["user_id"] : 0;
 $email = strtolower(trim($_GET["email"] ?? ""));
@@ -116,8 +117,8 @@ $scheme = (!empty($_SERVER["HTTPS"]) && $_SERVER["HTTPS"] !== "off") ? "https" :
 $host = $_SERVER["HTTP_HOST"] ?? "localhost";
 $baseUrl = $scheme . "://" . $host . "/vitalsync-backend/";
 
-$rawAvatar = !empty($profile["avatar_url"]) ? $profile["avatar_url"] : $user["profile_image"];
-$avatarUrl = !empty($rawAvatar) ? (preg_match('#^https?://#i', $rawAvatar) ? $rawAvatar : $baseUrl . ltrim($rawAvatar, "/")) : null;
+$rawAvatar = !empty($user["profile_image"]) ? $user["profile_image"] : ($profile["avatar_url"] ?? null);
+$avatarUrl = resolveAvatarUrl($rawAvatar);
 
 http_response_code(200);
 echo json_encode([
@@ -138,6 +139,7 @@ echo json_encode([
         "activity_level" => $user["activity_level"],
         "primary_goal" => $goals["primary_goal"],
         "profile_image" => $user["profile_image"],
+        "profile_image_url" => $avatarUrl,
         "image_url" => $avatarUrl,
         "avatar_url" => $avatarUrl,
         "created_at" => $user["created_at"],

@@ -11,19 +11,7 @@ if ($_SERVER["REQUEST_METHOD"] === "OPTIONS") {
 }
 
 require_once __DIR__ . "/../../config/db_connect.php";
-
-/**
- * Builds fully-qualified Avatar URL
- */
-function resolveAvatarUrl(?string $rawAvatar): ?string {
-    if (empty($rawAvatar)) return null;
-    if (preg_match('#^https?://#i', $rawAvatar)) {
-        return $rawAvatar;
-    }
-    $scheme = (!empty($_SERVER["HTTPS"]) && $_SERVER["HTTPS"] !== "off") ? "https" : "http";
-    $host = $_SERVER["HTTP_HOST"] ?? "localhost";
-    return $scheme . "://" . $host . "/vitalsync_background/" . ltrim($rawAvatar, "/");
-}
+require_once __DIR__ . "/../../config/url_helper.php";
 
 /**
  * Formats duration in minutes to readable "Xh Ym"
@@ -76,8 +64,8 @@ if ($userId <= 0) {
     sendResponse("error", "Unauthorized or invalid user_id / email provided for cloud sync", null, 401);
 }
 
-// Ensure the user exists in `users`
-$uStmt = $pdo->prepare("SELECT id, email, name, password, created_at FROM users WHERE id = ? LIMIT 1");
+// 2. Ensure the user exists in `users`
+$uStmt = $pdo->prepare("SELECT id, email, COALESCE(NULLIF(full_name, ''), name) AS name, profile_image, created_at FROM users WHERE id = ? LIMIT 1");
 $uStmt->execute([$userId]);
 $user = $uStmt->fetch();
 
@@ -302,7 +290,7 @@ if (!$profile) {
     $profile = $pStmt->fetch();
 }
 
-$avatarFull = resolveAvatarUrl($profile["avatar_url"] ?? null);
+$avatarFull = resolveAvatarUrl(!empty($user["profile_image"]) ? $user["profile_image"] : ($profile["avatar_url"] ?? null));
 
 // Calculate BMI
 $bmi = null;
@@ -555,34 +543,42 @@ foreach ($rawVitals as $v) {
 }
 
 // 9. Active Reminders
-$remStmt = $pdo->prepare("SELECT id, title, reminder_type, time, frequency, is_enabled FROM reminders WHERE user_id = ? ORDER BY id ASC");
-$remStmt->execute([$userId]);
 $reminders = [];
-while ($r = $remStmt->fetch()) {
-    $reminders[] = [
-        "id" => (int)$r["id"],
-        "title" => $r["title"],
-        "reminder_type" => $r["reminder_type"],
-        "time" => $r["time"],
-        "frequency" => $r["frequency"],
-        "is_enabled" => (bool)$r["is_enabled"]
-    ];
+try {
+    $remStmt = $pdo->prepare("SELECT id, title, time, frequency, is_enabled FROM reminders WHERE user_id = ? ORDER BY id ASC");
+    $remStmt->execute([$userId]);
+    while ($r = $remStmt->fetch()) {
+        $reminders[] = [
+            "id" => (int)$r["id"],
+            "title" => $r["title"],
+            "reminder_type" => "general",
+            "time" => $r["time"],
+            "frequency" => $r["frequency"],
+            "is_enabled" => (bool)$r["is_enabled"]
+        ];
+    }
+} catch (\Throwable $e) {
+    $reminders = [];
 }
 
-// 10. Paired Bluetooth Devices
-$devStmt = $pdo->prepare("SELECT id, device_name, mac_address, device_category, is_connected, battery_level, last_synced_at FROM user_devices WHERE user_id = ?");
-$devStmt->execute([$userId]);
+// 10. Paired Bluetooth Devices (legacy compatibility)
 $devices = [];
-while ($d = $devStmt->fetch()) {
-    $devices[] = [
-        "id" => (int)$d["id"],
-        "device_name" => $d["device_name"],
-        "mac_address" => $d["mac_address"],
-        "device_category" => $d["device_category"],
-        "is_connected" => (bool)$d["is_connected"],
-        "battery_level" => $d["battery_level"] !== null ? (int)$d["battery_level"] : null,
-        "last_synced_at" => $d["last_synced_at"]
-    ];
+try {
+    $devStmt = $pdo->prepare("SELECT id, device_name, mac_address, device_category, is_connected, battery_level, last_synced_at FROM user_devices WHERE user_id = ?");
+    $devStmt->execute([$userId]);
+    while ($d = $devStmt->fetch()) {
+        $devices[] = [
+            "id" => (int)$d["id"],
+            "device_name" => $d["device_name"],
+            "mac_address" => $d["mac_address"],
+            "device_category" => $d["device_category"],
+            "is_connected" => (bool)$d["is_connected"],
+            "battery_level" => $d["battery_level"] !== null ? (int)$d["battery_level"] : null,
+            "last_synced_at" => $d["last_synced_at"]
+        ];
+    }
+} catch (\Throwable $e) {
+    $devices = [];
 }
 
 // =========================================================================

@@ -20,16 +20,12 @@ if (!defined("OLLAMA_BASE_URL")) define("OLLAMA_BASE_URL", "http://127.0.0.1:114
 if (!defined("OLLAMA_MODEL")) define("OLLAMA_MODEL", "qwen2.5:1.5b");
 
 $userId = 0;
-if (isset($_GET["user_id"]) && is_numeric($_GET["user_id"])) {
+if (isset($_GET["user_id"]) && is_numeric($_GET["user_id"]) && (int)$_GET["user_id"] > 0) {
     $userId = (int)$_GET["user_id"];
-} elseif (isset($_POST["user_id"]) && is_numeric($_POST["user_id"])) {
+} elseif (isset($_POST["user_id"]) && is_numeric($_POST["user_id"]) && (int)$_POST["user_id"] > 0) {
     $userId = (int)$_POST["user_id"];
 } else {
-    $userId = resolveUserIdOrDie($conn, true);
-}
-
-if ($userId <= 0) {
-    $userId = 1; // Default guest user
+    $userId = resolveUserIdOrDie($conn, false);
 }
 
 // 1. Resolve is_bt_connected parameter

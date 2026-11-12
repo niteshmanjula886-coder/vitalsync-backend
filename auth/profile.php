@@ -11,6 +11,7 @@ if ($_SERVER["REQUEST_METHOD"] === "OPTIONS") {
 }
 
 require_once __DIR__ . "/../config/db.php";
+require_once __DIR__ . "/../config/url_helper.php";
 
 function respond($status, $data) {
     http_response_code($status);
@@ -23,8 +24,8 @@ function buildProfileResponse($user, $userProfile = null) {
     $host = $_SERVER["HTTP_HOST"] ?? "localhost";
     $baseUrl = $scheme . "://" . $host . "/vitalsync-backend/";
 
-    $rawAvatar = !empty($userProfile["avatar_url"]) ? $userProfile["avatar_url"] : ($user["profile_image"] ?? null);
-    $imageUrl = !empty($rawAvatar) ? (preg_match('#^https?://#i', $rawAvatar) ? $rawAvatar : $baseUrl . ltrim($rawAvatar, "/")) : null;
+    $rawAvatar = !empty($user["profile_image"]) ? $user["profile_image"] : ($userProfile["avatar_url"] ?? null);
+    $imageUrl = resolveAvatarUrl($rawAvatar);
 
     $dob = $user["dob"] ?? null;
     $age = $userProfile["age"] ?? ($user["age"] !== null ? (int)$user["age"] : null);
@@ -62,6 +63,7 @@ function buildProfileResponse($user, $userProfile = null) {
         "primary_goal" => $user["primary_goal"] ?? "Fitness",
         "step_goal" => isset($user["step_goal"]) && (int)$user["step_goal"] > 0 ? (int)$user["step_goal"] : null,
         "profile_image" => $user["profile_image"],
+        "profile_image_url" => $imageUrl,
         "image_url" => $imageUrl,
         "avatar_url" => $imageUrl,
         "created_at" => $user["created_at"],
@@ -273,11 +275,11 @@ if ($method === "POST" || $method === "PUT") {
     // Parse parameters
     $name = isset($data["name"]) || isset($data["full_name"]) ? trim($data["name"] ?? $data["full_name"]) : $existing["full_name"];
     $phone = isset($data["phone"]) ? trim((string)$data["phone"]) : $existing["phone"];
-    $gender = isset($data["gender"]) ? trim((string)$data["gender"]) : ($existing["gender"] ?: "Not Specified");
+    $gender = isset($data["gender"]) ? trim((string)$data["gender"]) : ($existing["gender"] ?: null);
     $bloodGroup = isset($data["blood_group"]) ? strtoupper(trim((string)$data["blood_group"])) : null;
     $dob = isset($data["dob"]) ? trim((string)$data["dob"]) : $existing["dob"];
 
-    $age = isset($data["age"]) && is_numeric($data["age"]) ? (int)$data["age"] : ($existing["age"] !== null ? (int)$existing["age"] : 24);
+    $age = isset($data["age"]) && is_numeric($data["age"]) && (int)$data["age"] > 0 ? (int)$data["age"] : ($existing["age"] !== null ? (int)$existing["age"] : null);
     if (!isset($data["age"]) && !empty($dob)) {
         if (preg_match('/\b(19\d\d|20\d\d)\b/', $dob, $matches)) {
             $birthYear = (int)$matches[1];
@@ -312,29 +314,53 @@ if ($method === "POST" || $method === "PUT") {
     $primaryGoal = isset($data["primary_goal"]) ? trim((string)$data["primary_goal"]) : $existing["primary_goal"];
 
     // 1. Update users table
-    $uUp = $conn->prepare(
-        "UPDATE users SET full_name = ?, phone = ?, dob = ?, age = ?, gender = ?, height = ?, weight = ?, activity_level = ?, primary_goal = ? WHERE id = ?"
-    );
+    $clearProfileImage = !empty($data["clear_profile_image"]) || (array_key_exists("profile_image", $data) && ($data["profile_image"] === null || $data["profile_image"] === ""));
+    if ($clearProfileImage) {
+        $uUp = $conn->prepare(
+            "UPDATE users SET full_name = ?, phone = ?, dob = ?, age = ?, gender = ?, height = ?, weight = ?, activity_level = ?, primary_goal = ?, profile_image = NULL WHERE id = ?"
+        );
+    } else {
+        $uUp = $conn->prepare(
+            "UPDATE users SET full_name = ?, phone = ?, dob = ?, age = ?, gender = ?, height = ?, weight = ?, activity_level = ?, primary_goal = ? WHERE id = ?"
+        );
+    }
     $uUp->bind_param("sssisddssi", $name, $phone, $dob, $age, $gender, $height, $weight, $activityLevel, $primaryGoal, $targetUserId);
     $uUp->execute();
     $uUp->close();
 
     // 2. Upsert into user_profiles table
-    $avatarUrl = isset($data["avatar_url"]) ? trim((string)$data["avatar_url"]) : null;
-    $pUp = $conn->prepare(
-        "INSERT INTO user_profiles (user_id, full_name, age, gender, height_cm, weight_kg, blood_group, phone, avatar_url)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE
-             full_name = VALUES(full_name),
-             age = VALUES(age),
-             gender = VALUES(gender),
-             height_cm = VALUES(height_cm),
-             weight_kg = VALUES(weight_kg),
-             blood_group = COALESCE(VALUES(blood_group), blood_group),
-             phone = VALUES(phone),
-             avatar_url = COALESCE(VALUES(avatar_url), avatar_url)"
-    );
-    $pUp->bind_param("isisddsss", $targetUserId, $name, $age, $gender, $height, $weight, $bloodGroup, $phone, $avatarUrl);
+    $avatarUrl = $clearProfileImage ? null : (isset($data["avatar_url"]) ? trim((string)$data["avatar_url"]) : null);
+    if ($clearProfileImage) {
+        $pUp = $conn->prepare(
+            "INSERT INTO user_profiles (user_id, full_name, age, gender, height_cm, weight_kg, blood_group, phone, avatar_url)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+             ON DUPLICATE KEY UPDATE
+                 full_name = VALUES(full_name),
+                 age = VALUES(age),
+                 gender = VALUES(gender),
+                 height_cm = VALUES(height_cm),
+                 weight_kg = VALUES(weight_kg),
+                 blood_group = COALESCE(VALUES(blood_group), blood_group),
+                 phone = VALUES(phone),
+                 avatar_url = NULL"
+        );
+        $pUp->bind_param("isisddss", $targetUserId, $name, $age, $gender, $height, $weight, $bloodGroup, $phone);
+    } else {
+        $pUp = $conn->prepare(
+            "INSERT INTO user_profiles (user_id, full_name, age, gender, height_cm, weight_kg, blood_group, phone, avatar_url)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+                 full_name = VALUES(full_name),
+                 age = VALUES(age),
+                 gender = VALUES(gender),
+                 height_cm = VALUES(height_cm),
+                 weight_kg = VALUES(weight_kg),
+                 blood_group = COALESCE(VALUES(blood_group), blood_group),
+                 phone = VALUES(phone),
+                 avatar_url = COALESCE(VALUES(avatar_url), avatar_url)"
+        );
+        $pUp->bind_param("isisddsss", $targetUserId, $name, $age, $gender, $height, $weight, $bloodGroup, $phone, $avatarUrl);
+    }
     $pUp->execute();
     $pUp->close();
 

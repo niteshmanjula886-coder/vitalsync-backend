@@ -211,7 +211,11 @@ if ($stmt->execute()) {
             "height" => $height,
             "weight" => $weight,
             "activity_level" => $activityLevel,
-            "primary_goal" => $primaryGoal
+            "primary_goal" => $primaryGoal,
+            "profile_image" => null,
+            "profile_image_url" => null,
+            "image_url" => null,
+            "avatar_url" => null
         ]
     ], JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
 } elseif ($stmt->errno === 1062) {
