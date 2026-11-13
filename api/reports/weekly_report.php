@@ -98,10 +98,24 @@ if ($avgSys === null) {
 }
 
 $bpCategory = "No Data";
+$bpScore = 0;
 if ($avgSys !== null && $avgDia !== null) {
-    if ($avgSys <= 120 && $avgDia <= 80) $bpCategory = "Normal";
-    elseif ($avgSys <= 129 && $avgDia <= 80) $bpCategory = "Mid";
-    else $bpCategory = "Low";
+    if ($avgSys < 90 || $avgDia < 60) {
+        $bpCategory = "Low";
+        $bpScore = 40;
+    } elseif ($avgSys >= 140 || $avgDia >= 90) {
+        $bpCategory = "Low";
+        $bpScore = 45;
+    } elseif ($avgSys >= 130 || $avgDia >= 80) {
+        $bpCategory = "Mid";
+        $bpScore = 70;
+    } elseif ($avgSys >= 120 && $avgDia < 80) {
+        $bpCategory = "Mid";
+        $bpScore = 80;
+    } else {
+        $bpCategory = "Normal";
+        $bpScore = 95;
+    }
 }
 
 // 3. SpO2 Stats
@@ -124,10 +138,18 @@ if ($avgSpo2 === null) {
 }
 
 $spo2Category = "No Data";
+$spo2Score = 0;
 if ($avgSpo2 !== null && $avgSpo2 > 0) {
-    if ($avgSpo2 >= 95) $spo2Category = "Normal";
-    elseif ($avgSpo2 >= 90) $spo2Category = "Mid";
-    else $spo2Category = "Low";
+    if ($avgSpo2 >= 95) {
+        $spo2Category = "Normal";
+        $spo2Score = 98;
+    } elseif ($avgSpo2 >= 90) {
+        $spo2Category = "Mid";
+        $spo2Score = 65;
+    } else {
+        $spo2Category = "Low";
+        $spo2Score = 30;
+    }
 }
 
 /**
@@ -380,9 +402,52 @@ if ($avgSteps > 0) {
     }
 }
 
-// 7. Composite Wellness Score & Performance Category
+// 7. Resolve User Health Goals for Percentages & Baselines
+$dailyStepGoal = 10000;
+$dailyWaterGoal = 2000;
+$nightlySleepTargetHours = 8.0;
+
+$gStmt = $conn->prepare("SELECT target_steps, target_water_ml, target_sleep_hours FROM user_health_goals WHERE user_id = ? LIMIT 1");
+if ($gStmt) {
+    $gStmt->bind_param("i", $userId);
+    $gStmt->execute();
+    $gRow = $gStmt->get_result()->fetch_assoc();
+    $gStmt->close();
+    if ($gRow) {
+        if (!empty($gRow["target_steps"]) && (int)$gRow["target_steps"] > 0) $dailyStepGoal = (int)$gRow["target_steps"];
+        if (!empty($gRow["target_water_ml"]) && (int)$gRow["target_water_ml"] > 0) $dailyWaterGoal = (int)$gRow["target_water_ml"];
+        if (!empty($gRow["target_sleep_hours"]) && (float)$gRow["target_sleep_hours"] > 0) $nightlySleepTargetHours = (float)$gRow["target_sleep_hours"];
+    }
+}
+
+if ($dailyWaterGoal === 2000) {
+    $hgStmt = $conn->prepare("SELECT daily_target_ml FROM hydration_goals WHERE user_id = ? LIMIT 1");
+    if ($hgStmt) {
+        $hgStmt->bind_param("i", $userId);
+        $hgStmt->execute();
+        $hgRow = $hgStmt->get_result()->fetch_assoc();
+        $hgStmt->close();
+        if ($hgRow && !empty($hgRow["daily_target_ml"]) && (int)$hgRow["daily_target_ml"] > 0) {
+            $dailyWaterGoal = (int)$hgRow["daily_target_ml"];
+        }
+    }
+}
+
+$weeklyStepGoal = $dailyStepGoal * 7;
+$weeklyWaterGoal = $dailyWaterGoal * 7;
+$targetSleepMinutes = (int)round($nightlySleepTargetHours * 60);
+
+$stepsPercent = $weeklyStepGoal > 0 ? min(100, (int)round(($totalSteps / (float)$weeklyStepGoal) * 100)) : 0;
+$hydrationPercent = $weeklyWaterGoal > 0 ? min(100, (int)round(($totalHydrationMl / (float)$weeklyWaterGoal) * 100)) : 0;
+$sleepPercent = $targetSleepMinutes > 0 ? min(100, (int)round(($avgSleepMin / (float)$targetSleepMinutes) * 100)) : 0;
+$sleepHours = round($avgSleepMin / 60.0, 1);
+$sleepDuration = intdiv($avgSleepMin, 60) . "h " . ($avgSleepMin % 60) . "m";
+
+// 8. Composite Wellness Score & Performance Category
 $activeScores = [];
 if ($hrScore > 0) $activeScores[] = $hrScore;
+if ($bpScore > 0) $activeScores[] = $bpScore;
+if ($spo2Score > 0) $activeScores[] = $spo2Score;
 if ($sleepScore > 0) $activeScores[] = $sleepScore;
 if ($hydrationScore > 0) $activeScores[] = $hydrationScore;
 if ($activityScore > 0) $activeScores[] = $activityScore;
@@ -399,21 +464,98 @@ if (count($activeScores) > 0) {
         $performanceCategory = "low";
     }
 }
+$wellnessStatus = ucfirst($performanceCategory);
 
-// Summary observation text
-$summaryParts = [];
-if ($avgHr !== null) $summaryParts[] = "Resting heart rate averaged {$avgHr} BPM ($hrCategory)";
-if ($avgSleepMin > 0) $summaryParts[] = "Sleep averaged " . intdiv($avgSleepMin, 60) . "h " . ($avgSleepMin % 60) . "m nightly ($sleepCategory)";
-if ($avgHydrationMl > 0) $summaryParts[] = "Hydration averaged {$avgHydrationMl} ml daily ($hydrationCategory)";
-if ($avgSteps > 0) $summaryParts[] = "Physical activity averaged " . number_format($avgSteps) . " steps/day ($activityCategory)";
+$hrValue = $avgHr !== null ? (string)$avgHr : "--";
+$hrStatus = $hrCategory;
+$spo2Value = $avgSpo2 !== null ? (string)$avgSpo2 : "--";
+$spo2Status = $spo2Category;
+$sys = $avgSys !== null ? (string)$avgSys : "--";
+$dia = $avgDia !== null ? (string)$avgDia : "--";
+$bpStatus = $bpCategory;
+$steps = number_format($totalSteps);
+$stepGoal = number_format($weeklyStepGoal);
+$hydrationMl = number_format($totalHydrationMl);
+$waterGoal = number_format($weeklyWaterGoal);
 
-if (!empty($summaryParts)) {
-    $summaryText = "Weekly clinical performance: " . implode(". ", $summaryParts) . ". Wellness grade: " . strtoupper($performanceCategory) . " (" . $wellnessScore . "/100).";
-} else {
-    $summaryText = "No weekly vital logs recorded yet. Start tracking or connect a smartwatch to view clinical observations.";
+// 9. Ollama Executive Summary Generation & Deterministic Clinical Fallback
+$breakdownPrompt = "Generate a concise 3-4 sentence clinical Executive Summary and 3 specific Action Recommendations based strictly on this user's calculated Vital Performance Breakdown:\n" .
+    "- Overall Wellness Score: {$wellnessScore}/100 ({$wellnessStatus})\n" .
+    "- Heart Rate: {$hrValue} BPM ({$hrStatus}) - Score: {$hrScore}%\n" .
+    "- Blood Oxygen (SpO2): {$spo2Value}% ({$spo2Status}) - Score: {$spo2Score}%\n" .
+    "- Blood Pressure: {$sys}/{$dia} mmHg ({$bpStatus}) - Score: {$bpScore}%\n" .
+    "- Activity: {$steps} / {$stepGoal} steps ({$stepsPercent}%)\n" .
+    "- Hydration: {$hydrationMl} / {$waterGoal} ml ({$hydrationPercent}%)\n" .
+    "- Sleep: {$sleepHours} hrs ({$sleepPercent}%)\n\n" .
+    "Rules:\n" .
+    "1. Explicitly cite the user's exact numbers (e.g. {$wellnessScore}/100, {$sys}/{$dia} mmHg, {$hydrationMl} ml, {$steps} steps) in the summary.\n" .
+    "2. Highlight which vitals are performing well (Optimal) and which specific metrics pulled the Wellness Score down (Needs Attention/Alert).\n" .
+    "3. Output valid JSON: {\"executive_summary\": \"...\", \"key_findings\": [\"...\", \"...\"], \"recommendations\": [\"...\", \"...\"]}";
+
+$fallbackSummary = "Executive Summary: Overall weekly health scored {$wellnessScore}/100 ({$wellnessStatus}). " .
+    "Cardiovascular vitals show resting heart rate at {$hrValue} BPM ({$hrStatus}) and blood pressure at {$sys}/{$dia} mmHg ({$bpStatus}). " .
+    "Respiratory oxygenation sits at {$spo2Value}% SpO2 ({$spo2Status}). " .
+    "Lifestyle metrics recorded {$steps} steps ({$stepsPercent}% of goal), {$hydrationMl} ml hydration ({$hydrationPercent}% of goal), and {$sleepDuration} sleep ({$sleepPercent}% of target).";
+
+$keyFindings = [];
+if ($hrScore > 0) $keyFindings[] = "Heart Rate: {$hrValue} BPM ({$hrStatus})";
+if ($bpScore > 0) $keyFindings[] = "Blood Pressure: {$sys}/{$dia} mmHg ({$bpStatus})";
+if ($spo2Score > 0) $keyFindings[] = "SpO2: {$spo2Value}% ({$spo2Status})";
+if ($avgSleepMin > 0) $keyFindings[] = "Sleep: {$sleepDuration} avg ({$sleepCategory})";
+if ($totalHydrationMl > 0) $keyFindings[] = "Hydration: {$hydrationMl} ml ({$hydrationCategory})";
+if ($totalSteps > 0) $keyFindings[] = "Activity: {$steps} steps ({$activityCategory})";
+
+$recommendations = [];
+if ($spo2Category === "Low") $recommendations[] = "Prioritize well-ventilated environments and check oxygenation levels regularly.";
+if ($bpCategory === "Low") $recommendations[] = "Monitor blood pressure consistently and ensure adequate hydration and electrolytes.";
+if ($activityCategory === "Low") $recommendations[] = "Gradually increase daily walking to close the step deficit.";
+if ($hydrationCategory === "Low") $recommendations[] = "Drink water consistently throughout the day to meet the 2,000+ ml baseline.";
+if (empty($recommendations)) {
+    $recommendations[] = "Maintain your current optimal habits across cardiovascular and lifestyle vitals.";
 }
 
-// 8. Persist into weekly_health_reports table
+$summaryText = $fallbackSummary;
+if (function_exists('curl_init')) {
+    $ollamaPayload = json_encode([
+        "model" => "qwen2.5:1.5b",
+        "prompt" => $breakdownPrompt,
+        "stream" => false,
+        "format" => "json",
+        "options" => [
+            "temperature" => 0.2,
+            "top_p" => 0.85,
+            "num_predict" => 250
+        ]
+    ]);
+    $ch = curl_init("http://127.0.0.1:11434/api/generate");
+    if ($ch) {
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $ollamaPayload);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ["Content-Type: application/json"]);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 6);
+        $resp = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($httpCode === 200 && $resp) {
+            $parsedResp = json_decode($resp, true);
+            $contentStr = $parsedResp["response"] ?? "";
+            $jsonContent = json_decode($contentStr, true);
+            if ($jsonContent && !empty($jsonContent["executive_summary"])) {
+                $summaryText = trim($jsonContent["executive_summary"]);
+                if (!empty($jsonContent["key_findings"]) && is_array($jsonContent["key_findings"])) {
+                    $keyFindings = $jsonContent["key_findings"];
+                }
+                if (!empty($jsonContent["recommendations"]) && is_array($jsonContent["recommendations"])) {
+                    $recommendations = $jsonContent["recommendations"];
+                }
+            }
+        }
+    }
+}
+
+// 10. Persist into weekly_health_reports table
 $insStmt = $conn->prepare(
     "INSERT INTO weekly_health_reports (user_id, week_start_date, week_end_date, wellness_score, performance_category, heart_rate_score, sleep_score, hydration_score, activity_score, summary_text)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -448,6 +590,60 @@ if ($insStmt) {
 
 $conn->close();
 
+$totalDistanceKm = round($totalSteps * 0.00078, 2);
+$totalCaloriesBurned = (int)round($totalSteps * 0.045);
+
+$vitalPerformanceBreakdown = [
+    "overall_wellness_score" => $wellnessScore,
+    "overall_status" => $wellnessStatus,
+    "heart_rate" => [
+        "value" => $avgHr !== null ? "{$avgHr} BPM" : "-- BPM",
+        "status" => $hrCategory,
+        "score" => $hrScore
+    ],
+    "blood_pressure" => [
+        "value" => ($avgSys !== null && $avgDia !== null) ? "{$avgSys}/{$avgDia} mmHg" : "--/--",
+        "status" => $bpCategory,
+        "score" => $bpScore
+    ],
+    "spo2" => [
+        "value" => $avgSpo2 !== null ? "{$avgSpo2}%" : "--%",
+        "status" => $spo2Category,
+        "score" => $spo2Score
+    ],
+    "sleep" => [
+        "value" => $avgSleepMin > 0 ? "{$averageSleepQuality}% - {$sleepCategory}" : "--",
+        "status" => $avgSleepMin > 0 ? "{$sleepDuration} avg" : "No Logs Recorded",
+        "score" => $sleepScore,
+        "duration_minutes" => $avgSleepMin,
+        "completion_percent" => $sleepPercent
+    ],
+    "hydration" => [
+        "value" => $totalHydrationMl > 0 ? "{$totalHydrationMl} ml" : "0 ml",
+        "status" => $hydrationCategory,
+        "score" => $hydrationScore,
+        "total_ml" => $totalHydrationMl,
+        "goal_ml" => $weeklyWaterGoal,
+        "completion_percent" => $hydrationPercent
+    ],
+    "activity" => [
+        "value" => $totalSteps > 0 ? number_format($totalSteps) . " steps" : "0 steps",
+        "status" => $activityCategory,
+        "score" => $activityScore,
+        "total_steps" => $totalSteps,
+        "goal_steps" => $weeklyStepGoal,
+        "completion_percent" => $stepsPercent,
+        "distance_km" => $totalDistanceKm,
+        "calories_kcal" => $totalCaloriesBurned
+    ]
+];
+
+$executiveSummary = [
+    "summary" => $summaryText,
+    "key_findings" => $keyFindings,
+    "recommendations" => $recommendations
+];
+
 respondJson(200, [
     "status" => "success",
     "success" => true,
@@ -463,6 +659,8 @@ respondJson(200, [
         "logged_sleep_days" => $loggedSleepDays,
         "scores" => [
             "heart_rate" => $hrScore,
+            "blood_pressure" => $bpScore,
+            "spo2" => $spo2Score,
             "sleep" => $sleepScore,
             "hydration" => $hydrationScore,
             "activity" => $activityScore
@@ -478,7 +676,7 @@ respondJson(200, [
             "spo2_avg" => $avgSpo2 !== null ? "{$avgSpo2}%" : "--%",
             "spo2_status" => $spo2Category,
             "sleep_quality" => $avgSleepMin > 0 ? "{$averageSleepQuality}% - {$sleepCategory}" : "--",
-            "sleep_status" => $sleepCategory,
+            "sleep_status" => $avgSleepMin > 0 ? "{$sleepDuration} avg" : "No Logs Recorded",
             "avg_sleep_minutes" => $avgSleepMin,
             "average_duration_minutes" => $avgSleepMin,
             "average_sleep_quality" => $averageSleepQuality,
@@ -491,6 +689,8 @@ respondJson(200, [
             "total_steps" => $totalSteps,
             "workout_count" => $workoutCount
         ],
+        "vital_performance_breakdown" => $vitalPerformanceBreakdown,
+        "executive_summary" => $executiveSummary,
         "summary_text" => $summaryText
     ]
 ]);

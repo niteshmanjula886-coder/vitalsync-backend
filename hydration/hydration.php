@@ -188,10 +188,10 @@ if ($method === "POST") {
     $amountMl = isset($data["amount_ml"]) ? (int)$data["amount_ml"] : (isset($data["volume_ml"]) ? (int)$data["volume_ml"] : (isset($data["amount"]) ? (int)$data["amount"] : 0));
     $date = !empty($data["date_string"]) ? trim((string)$data["date_string"]) : (!empty($data["date"]) ? trim((string)$data["date"]) : $today);
 
-    if ($amountMl < 0 || $amountMl > 5000) {
+    if ($amountMl < 0) {
         respondJson(400, [
             "success" => false,
-            "message" => "Please provide a valid water amount between 1 and 5000 ml"
+            "message" => "Please provide a valid water amount greater than or equal to 0 ml"
         ]);
     }
 

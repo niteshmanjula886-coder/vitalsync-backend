@@ -294,6 +294,50 @@ respondJson(200, [
         "workout_summary" => [
             "total_workouts" => $totalWorkouts,
             "total_duration_minutes" => $totalWorkoutMin
+        ],
+        "vital_performance_breakdown" => [
+            "overall_wellness_score" => $overallScore ?: 0,
+            "overall_status" => $scoreGrade,
+            "heart_rate" => [
+                "value" => $avgHr !== null ? "{$avgHr} BPM" : "-- BPM",
+                "status" => ($avgHr !== null && $avgHr >= 60 && $avgHr <= 100) ? "Normal" : "Review Needed",
+                "score" => ($avgHr !== null && $avgHr >= 60 && $avgHr <= 100) ? 95 : 60
+            ],
+            "blood_pressure" => [
+                "value" => ($avgSys !== null && $avgDia !== null) ? "{$avgSys}/{$avgDia} mmHg" : "--/-- mmHg",
+                "status" => $bpClassification,
+                "score" => ($avgSys !== null && $avgSys <= 120 && $avgDia <= 80) ? 95 : 65
+            ],
+            "spo2" => [
+                "value" => $avgSpo2 !== null ? "{$avgSpo2}%" : "--%",
+                "status" => ($avgSpo2 !== null && $avgSpo2 >= 95) ? "Optimal" : "Review Needed",
+                "score" => ($avgSpo2 !== null && $avgSpo2 >= 95) ? 98 : 60
+            ],
+            "sleep" => [
+                "value" => $avgSleepMin > 0 ? "{$optimalNightsPct}% - {$avgSleepHoursFormatted}" : "--",
+                "status" => $avgSleepMin > 0 ? "{$avgSleepHoursFormatted} avg" : "No Logs Recorded",
+                "score" => $avgSleepMin >= 420 ? 90 : 60,
+                "duration_minutes" => $avgSleepMin,
+                "completion_percent" => min(100, (int)round(($avgSleepMin / 480.0) * 100))
+            ],
+            "hydration" => [
+                "value" => "{$totalHydrationLiters} L",
+                "status" => $avgHydrationMl >= 2000 ? "Normal" : "Low",
+                "score" => min(100, (int)round(($avgHydrationMl / 2000.0) * 100)),
+                "total_ml" => (int)round($totalHydrationLiters * 1000),
+                "goal_ml" => 14000,
+                "completion_percent" => min(100, (int)round(($avgHydrationMl / 2000.0) * 100))
+            ],
+            "activity" => [
+                "value" => number_format($totalSteps) . " steps",
+                "status" => $avgDailySteps >= 8000 ? "Normal" : "Low",
+                "score" => min(100, (int)round(($avgDailySteps / 8000.0) * 100)),
+                "total_steps" => $totalSteps,
+                "goal_steps" => 56000,
+                "completion_percent" => min(100, (int)round(($totalSteps / 56000.0) * 100)),
+                "distance_km" => $totalDistanceKm,
+                "calories_kcal" => $totalCaloriesBurned
+            ]
         ]
     ]
 ]);
