@@ -181,6 +181,73 @@ if (!empty($sleepTextParam) && $sleepTextParam !== "--" && strtolower($sleepText
             }
         }
     }
+
+    // All-time latest fallback across sleep tables if last 24h was empty
+    if ($sleepFormatted === "No sleep logged") {
+        $sAll = $conn->prepare(
+            "SELECT COALESCE(NULLIF(duration_minutes, 0), TIMESTAMPDIFF(MINUTE, start_time, end_time), 0) AS dur_mins,
+                    quality_score
+             FROM sleep_logs
+             WHERE user_id = ? AND duration_minutes > 0
+             ORDER BY COALESCE(logged_at, created_at, start_time) DESC, id DESC LIMIT 1"
+        );
+        if ($sAll) {
+            $sAll->bind_param("i", $userId);
+            $sAll->execute();
+            $sAllRes = $sAll->get_result()->fetch_assoc();
+            $sAll->close();
+            if ($sAllRes && (int)$sAllRes["dur_mins"] > 0) {
+                $sleepDurationMinutes = (int)$sAllRes["dur_mins"];
+                $sleepQualityScore = $sAllRes["quality_score"] !== null ? (int)$sAllRes["quality_score"] : null;
+                $h = floor($sleepDurationMinutes / 60);
+                $m = $sleepDurationMinutes % 60;
+                $sleepFormatted = "{$h}h {$m}m";
+            }
+        }
+    }
+    if ($sleepFormatted === "No sleep logged") {
+        $srAll = $conn->prepare(
+            "SELECT duration_minutes, sleep_score
+             FROM sleep_records
+             WHERE user_id = ? AND duration_minutes > 0
+             ORDER BY date_string DESC, id DESC LIMIT 1"
+        );
+        if ($srAll) {
+            $srAll->bind_param("i", $userId);
+            $srAll->execute();
+            $srAllRes = $srAll->get_result()->fetch_assoc();
+            $srAll->close();
+            if ($srAllRes && !empty($srAllRes["duration_minutes"])) {
+                $dur = (int)$srAllRes["duration_minutes"];
+                $sleepDurationMinutes = $dur;
+                $h = floor($dur / 60);
+                $m = $dur % 60;
+                $sleepFormatted = "{$h}h {$m}m";
+                $sleepQualityScore = isset($srAllRes["sleep_score"]) ? (int)$srAllRes["sleep_score"] : null;
+            }
+        }
+    }
+    if ($sleepFormatted === "No sleep logged") {
+        $vrAll = $conn->prepare(
+            "SELECT value_numeric, value_text
+             FROM vitals_readings
+             WHERE user_id = ? AND reading_type = 'sleep' AND value_numeric > 0
+             ORDER BY recorded_at DESC, id DESC LIMIT 1"
+        );
+        if ($vrAll) {
+            $vrAll->bind_param("i", $userId);
+            $vrAll->execute();
+            $vrAllRes = $vrAll->get_result()->fetch_assoc();
+            $vrAll->close();
+            if ($vrAllRes && (float)$vrAllRes["value_numeric"] > 0) {
+                $dur = (int)round((float)$vrAllRes["value_numeric"]);
+                $sleepDurationMinutes = $dur;
+                $h = floor($dur / 60);
+                $m = $dur % 60;
+                $sleepFormatted = !empty($vrAllRes["value_text"]) ? $vrAllRes["value_text"] : "{$h}h {$m}m";
+            }
+        }
+    }
 }
 
 // 5. Resolve Today's Steps and Step Goal
@@ -741,8 +808,8 @@ if (function_exists("curl_init")) {
             "Content-Type: application/json",
             "Content-Length: " . strlen($payload)
         ],
-        CURLOPT_CONNECTTIMEOUT => 5,
-        CURLOPT_TIMEOUT => 22
+        CURLOPT_CONNECTTIMEOUT => 2,
+        CURLOPT_TIMEOUT => 5
     ]);
 
     $rawResponse = curl_exec($ch);
@@ -752,7 +819,7 @@ if (function_exists("curl_init")) {
 } else {
     $errno = 0;
     $errstr = "";
-    $sock = @fsockopen("127.0.0.1", 11434, $errno, $errstr, 3);
+    $sock = @fsockopen("127.0.0.1", 11434, $errno, $errstr, 2);
     if ($sock) {
         fclose($sock);
         $opts = [
@@ -760,7 +827,7 @@ if (function_exists("curl_init")) {
                 "method" => "POST",
                 "header" => "Content-Type: application/json\r\nConnection: close\r\n",
                 "content" => $payload,
-                "timeout" => 22,
+                "timeout" => 5,
                 "ignore_errors" => true
             ]
         ];

@@ -26,7 +26,7 @@
 
 define("OLLAMA_BASE_URL", "http://127.0.0.1:11434");
 define("OLLAMA_MODEL", "qwen2.5:1.5b");
-define("OLLAMA_TIMEOUT_SECONDS", 120);
+define("OLLAMA_TIMEOUT_SECONDS", 10);
 
 /**
  * Checks if local Ollama daemon is reachable on port 11434.
@@ -36,8 +36,8 @@ function isOllamaReachable() {
         $ch = curl_init(OLLAMA_BASE_URL . "/");
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 3,
-            CURLOPT_CONNECTTIMEOUT => 3,
+            CURLOPT_TIMEOUT => 2,
+            CURLOPT_CONNECTTIMEOUT => 2,
             CURLOPT_NOBODY => true
         ]);
         curl_exec($ch);
@@ -47,7 +47,7 @@ function isOllamaReachable() {
     }
     $errno = 0;
     $errstr = "";
-    $sock = @fsockopen("127.0.0.1", 11434, $errno, $errstr, 3);
+    $sock = @fsockopen("127.0.0.1", 11434, $errno, $errstr, 2);
     if ($sock) {
         fclose($sock);
         return true;
@@ -104,8 +104,8 @@ function callAiChat(array $messages, $systemPrompt = "") {
                 "Content-Type: application/json",
                 "Content-Length: " . strlen($payload)
             ],
-            CURLOPT_CONNECTTIMEOUT => 3,
-            CURLOPT_TIMEOUT => 10
+            CURLOPT_CONNECTTIMEOUT => 2,
+            CURLOPT_TIMEOUT => 5
         ]);
 
         $rawResponse = curl_exec($ch);
@@ -115,7 +115,7 @@ function callAiChat(array $messages, $systemPrompt = "") {
     } else {
         $errno = 0;
         $errstr = "";
-        $sock = @fsockopen("127.0.0.1", 11434, $errno, $errstr, 3);
+        $sock = @fsockopen("127.0.0.1", 11434, $errno, $errstr, 2);
         if ($sock) {
             fclose($sock);
             $ctx = stream_context_create([
@@ -123,7 +123,7 @@ function callAiChat(array $messages, $systemPrompt = "") {
                     "method" => "POST",
                     "header" => "Content-Type: application/json\r\n",
                     "content" => $payload,
-                    "timeout" => 10,
+                    "timeout" => 5,
                     "ignore_errors" => true
                 ]
             ]);
@@ -221,7 +221,7 @@ function streamAiChat(array $messages, $systemPrompt, callable $chunkCallback) {
             "Content-Type: application/json",
             "Content-Length: " . strlen($payload)
         ],
-        CURLOPT_CONNECTTIMEOUT => 3,
+        CURLOPT_CONNECTTIMEOUT => 2,
         CURLOPT_TIMEOUT => 10,
         CURLOPT_WRITEFUNCTION => function($curlHandle, $data) use ($chunkCallback) {
             $lines = explode("\n", $data);

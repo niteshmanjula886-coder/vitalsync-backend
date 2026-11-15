@@ -366,7 +366,7 @@ function dispatchOllamaChatRequest(string $url, array $payload, int $timeoutSeco
         curl_setopt($ch, CURLOPT_HTTPHEADER, [
             "Content-Type: application/json; charset=utf-8"
         ]);
-        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
         curl_setopt($ch, CURLOPT_TIMEOUT, $timeoutSeconds);
 
         $execRes = curl_exec($ch);
@@ -429,7 +429,7 @@ $ollamaPayload = [
     ]
 ];
 
-$ollamaResult = dispatchOllamaChatRequest($ollamaUrl, $ollamaPayload, 60);
+$ollamaResult = dispatchOllamaChatRequest($ollamaUrl, $ollamaPayload, 12);
 $ollamaData = $ollamaResult["data"];
 $reply = $ollamaResult["ok"]
     ? ($ollamaData["message"]["content"] ?? $ollamaData["response"] ?? null)

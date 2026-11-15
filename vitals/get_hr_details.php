@@ -116,8 +116,8 @@ PROMPT;
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => $payload,
             CURLOPT_HTTPHEADER => ["Content-Type: application/json"],
-            CURLOPT_CONNECTTIMEOUT => 4,
-            CURLOPT_TIMEOUT => 18
+            CURLOPT_CONNECTTIMEOUT => 2,
+            CURLOPT_TIMEOUT => 5
         ]);
         $rawResponse = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -125,7 +125,7 @@ PROMPT;
     } else {
         $errno = 0;
         $errstr = "";
-        $sock = @fsockopen("127.0.0.1", 11434, $errno, $errstr, 3);
+        $sock = @fsockopen("127.0.0.1", 11434, $errno, $errstr, 2);
         if ($sock) {
             fclose($sock);
             $ctx = stream_context_create([
@@ -133,7 +133,7 @@ PROMPT;
                     "method" => "POST",
                     "header" => "Content-Type: application/json\r\nConnection: close\r\n",
                     "content" => $payload,
-                    "timeout" => 18,
+                    "timeout" => 5,
                     "ignore_errors" => true
                 ]
             ]);
