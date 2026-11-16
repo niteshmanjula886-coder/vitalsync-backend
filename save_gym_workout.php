@@ -41,6 +41,7 @@ $input = getInputData();
 $splitName = trim($input["split_name"] ?? $input["split"] ?? "Push");
 $durationMinutes = max(1, (int)($input["duration_minutes"] ?? $input["durationMinutes"] ?? 30));
 $totalVolumeKg = (float)($input["total_volume_kg"] ?? $input["totalVolumeKg"] ?? 0.0);
+<<<<<<< Updated upstream
 // Normalize exercises payload and filter out incomplete / unchecked rows
 $rawExercises = $input["exercises"] ?? [];
 if (is_string($rawExercises)) {
@@ -101,6 +102,18 @@ $metCalculatedCalories = max(1, (int)round(($met * 3.5 * $userWeight / 200.0) * 
 $rawCalories = (int)($input["calories_burned"] ?? $input["caloriesBurned"] ?? 0);
 $caloriesBurned = ($rawCalories > 0) ? $rawCalories : $metCalculatedCalories;
 
+=======
+$totalSets = (int)($input["total_sets"] ?? $input["totalSets"] ?? 0);
+$caloriesBurned = (int)($input["calories_burned"] ?? $input["caloriesBurned"] ?? round($durationMinutes * 6.5 + $totalVolumeKg * 0.02));
+
+// Normalize exercises payload
+$exercises = $input["exercises"] ?? [];
+if (is_string($exercises)) {
+    $exercises = json_decode($exercises, true) ?: [];
+}
+$exercisesJson = json_encode($exercises, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+>>>>>>> Stashed changes
 // Insert into gym_workouts
 $stmt = $conn->prepare("
     INSERT INTO gym_workouts (user_id, split_name, duration_minutes, total_volume_kg, total_sets, calories_burned, exercises_json, created_at)
@@ -114,16 +127,28 @@ if (!$stmt) {
     ]);
 }
 
+<<<<<<< Updated upstream
 $stmt->bind_param("isidiis", $userId, $splitName, $durationMinutes, $totalVolumeKg, $totalSets, $caloriesBurned, $exercisesJson);
+=======
+$stmt->bind_param("isidids", $userId, $splitName, $durationMinutes, $totalVolumeKg, $totalSets, $caloriesBurned, $exercisesJson);
+>>>>>>> Stashed changes
 $stmt->execute();
 $workoutId = $stmt->insert_id;
 $stmt->close();
 
+<<<<<<< Updated upstream
 // Insert individual sets if provided (strictly completed only)
 if ($workoutId > 0 && is_array($exercises) && !empty($exercises)) {
     $setStmt = $conn->prepare("
         INSERT INTO gym_workout_sets (workout_id, user_id, exercise_name, target_muscle, set_number, weight_kg, reps, is_completed, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, 1, NOW())
+=======
+// Insert individual sets if provided
+if ($workoutId > 0 && is_array($exercises) && !empty($exercises)) {
+    $setStmt = $conn->prepare("
+        INSERT INTO gym_workout_sets (workout_id, user_id, exercise_name, target_muscle, set_number, weight_kg, reps, is_completed, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
+>>>>>>> Stashed changes
     ");
     if ($setStmt) {
         foreach ($exercises as $ex) {
@@ -135,7 +160,12 @@ if ($workoutId > 0 && is_array($exercises) && !empty($exercises)) {
                     $setNum = (int)($st["setNumber"] ?? $st["set_number"] ?? 1);
                     $wKg = (float)($st["weightKg"] ?? $st["weight_kg"] ?? 0.0);
                     $reps = (int)($st["reps"] ?? 0);
+<<<<<<< Updated upstream
                     $setStmt->bind_param("iissidi", $workoutId, $userId, $exName, $targetMuscle, $setNum, $wKg, $reps);
+=======
+                    $isDone = (!empty($st["isCompleted"]) || !empty($st["is_completed"])) ? 1 : 0;
+                    $setStmt->bind_param("iissidii", $workoutId, $userId, $exName, $targetMuscle, $setNum, $wKg, $reps, $isDone);
+>>>>>>> Stashed changes
                     $setStmt->execute();
                 }
             }
