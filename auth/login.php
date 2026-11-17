@@ -6,8 +6,19 @@ header("Access-Control-Allow-Methods: POST, GET, OPTIONS");
 header("Content-Type: application/json; charset=UTF-8");
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit(); }
 
-require_once __DIR__ . "/../config/db.php";
-require_once __DIR__ . "/../config/url_helper.php";
+if (file_exists(__DIR__ . "/../config/db.php")) {
+    require_once __DIR__ . "/../config/db.php";
+} elseif (file_exists(__DIR__ . "/../db_connect.php")) {
+    require_once __DIR__ . "/../db_connect.php";
+} elseif (file_exists(__DIR__ . "/db_connect.php")) {
+    require_once __DIR__ . "/db_connect.php";
+}
+
+if (file_exists(__DIR__ . "/../config/url_helper.php")) {
+    require_once __DIR__ . "/../config/url_helper.php";
+} elseif (file_exists(__DIR__ . "/url_helper.php")) {
+    require_once __DIR__ . "/url_helper.php";
+}
 
 // Allow POST requests only
 if ($_SERVER["REQUEST_METHOD"] !== "POST") {
@@ -67,8 +78,19 @@ if (
 
 try {
     if (!isset($conn) || !($conn instanceof mysqli)) {
-        require_once __DIR__ . "/../config/db.php";
-require_once __DIR__ . "/../config/url_helper.php";
+        if (file_exists(__DIR__ . "/../config/db.php")) {
+    require_once __DIR__ . "/../config/db.php";
+} elseif (file_exists(__DIR__ . "/../db_connect.php")) {
+    require_once __DIR__ . "/../db_connect.php";
+} elseif (file_exists(__DIR__ . "/db_connect.php")) {
+    require_once __DIR__ . "/db_connect.php";
+}
+
+if (file_exists(__DIR__ . "/../config/url_helper.php")) {
+    require_once __DIR__ . "/../config/url_helper.php";
+} elseif (file_exists(__DIR__ . "/url_helper.php")) {
+    require_once __DIR__ . "/url_helper.php";
+}
     }
 
     // Find user account
