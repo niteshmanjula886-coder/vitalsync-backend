@@ -789,6 +789,7 @@ $payload = json_encode([
     "stream" => false,
     "keep_alive" => "15m",
     "options" => [
+        "num_gpu" => 0,
         "temperature" => 0.2,
         "num_predict" => 260
     ]
@@ -808,8 +809,8 @@ if (function_exists("curl_init")) {
             "Content-Type: application/json",
             "Content-Length: " . strlen($payload)
         ],
-        CURLOPT_CONNECTTIMEOUT => 2,
-        CURLOPT_TIMEOUT => 5
+        CURLOPT_CONNECTTIMEOUT => 5,
+        CURLOPT_TIMEOUT => 120
     ]);
 
     $rawResponse = curl_exec($ch);

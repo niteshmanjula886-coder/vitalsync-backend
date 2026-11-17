@@ -1031,6 +1031,7 @@ if (function_exists('curl_init')) {
         "stream" => false,
         "format" => "json",
         "options" => [
+            "num_gpu" => 0,
             "temperature" => 0.2,
             "top_p" => 0.85,
             "num_predict" => 250
@@ -1042,8 +1043,8 @@ if (function_exists('curl_init')) {
         curl_setopt($ch, CURLOPT_POST, true);
         curl_setopt($ch, CURLOPT_POSTFIELDS, $ollamaPayload);
         curl_setopt($ch, CURLOPT_HTTPHEADER, ["Content-Type: application/json"]);
-        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 3);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
         $resp = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);

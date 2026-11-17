@@ -1,5 +1,8 @@
 <?php
 
+set_time_limit(300);
+ini_set('max_execution_time', 300);
+
 /**
  * VitalSync AI - Local Ollama AI Engine (qwen2.5:1.5b)
  * 
@@ -26,7 +29,7 @@
 
 define("OLLAMA_BASE_URL", "http://127.0.0.1:11434");
 define("OLLAMA_MODEL", "qwen2.5:1.5b");
-define("OLLAMA_TIMEOUT_SECONDS", 10);
+define("OLLAMA_TIMEOUT_SECONDS", 300);
 
 /**
  * Checks if local Ollama daemon is reachable on port 11434.
@@ -36,8 +39,8 @@ function isOllamaReachable() {
         $ch = curl_init(OLLAMA_BASE_URL . "/");
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 2,
-            CURLOPT_CONNECTTIMEOUT => 2,
+            CURLOPT_TIMEOUT => 4,
+            CURLOPT_CONNECTTIMEOUT => 3,
             CURLOPT_NOBODY => true
         ]);
         curl_exec($ch);
@@ -47,7 +50,7 @@ function isOllamaReachable() {
     }
     $errno = 0;
     $errstr = "";
-    $sock = @fsockopen("127.0.0.1", 11434, $errno, $errstr, 2);
+    $sock = @fsockopen("127.0.0.1", 11434, $errno, $errstr, 3);
     if ($sock) {
         fclose($sock);
         return true;
@@ -61,7 +64,7 @@ function isOllamaReachable() {
  *
  * @param array $messages Array of ['role' => 'user'|'assistant'|'system', 'content' => string]
  * @param string $systemPrompt Enforces clinical reasoning and telemetry grounding
- * @return array|null Returns ['text' => string, 'model' => string, 'eval_count' => int] or null on failure
+ * @return array|null Returns ['text' => string, 'model' => string, 'eval_count' => int] or ['error' => string] on failure
  */
 function callAiChat(array $messages, $systemPrompt = "") {
     $formattedMessages = [];
@@ -83,7 +86,9 @@ function callAiChat(array $messages, $systemPrompt = "") {
         "model" => OLLAMA_MODEL,
         "messages" => $formattedMessages,
         "stream" => false,
+        "keep_alive" => "30m",
         "options" => [
+            "num_gpu" => 0,
             "temperature" => 0.4,
             "top_p" => 0.9,
             "num_predict" => 512
@@ -104,8 +109,8 @@ function callAiChat(array $messages, $systemPrompt = "") {
                 "Content-Type: application/json",
                 "Content-Length: " . strlen($payload)
             ],
-            CURLOPT_CONNECTTIMEOUT => 2,
-            CURLOPT_TIMEOUT => 5
+            CURLOPT_CONNECTTIMEOUT => 30,
+            CURLOPT_TIMEOUT => 300
         ]);
 
         $rawResponse = curl_exec($ch);
@@ -115,7 +120,7 @@ function callAiChat(array $messages, $systemPrompt = "") {
     } else {
         $errno = 0;
         $errstr = "";
-        $sock = @fsockopen("127.0.0.1", 11434, $errno, $errstr, 2);
+        $sock = @fsockopen("127.0.0.1", 11434, $errno, $errstr, 10);
         if ($sock) {
             fclose($sock);
             $ctx = stream_context_create([
@@ -123,7 +128,7 @@ function callAiChat(array $messages, $systemPrompt = "") {
                     "method" => "POST",
                     "header" => "Content-Type: application/json\r\n",
                     "content" => $payload,
-                    "timeout" => 5,
+                    "timeout" => 300,
                     "ignore_errors" => true
                 ]
             ]);
@@ -134,8 +139,25 @@ function callAiChat(array $messages, $systemPrompt = "") {
         }
     }
 
-    if ($curlErr || $httpCode < 200 || $httpCode >= 300 || empty($rawResponse)) {
-        return null;
+    if (!empty($curlErr)) {
+        error_log("Ollama cURL error: " . $curlErr);
+        return [
+            "error" => "Ollama cURL error: " . $curlErr,
+            "text" => null
+        ];
+    }
+
+    if ($httpCode < 200 || $httpCode >= 300 || empty($rawResponse)) {
+        $errDetail = "";
+        if (!empty($rawResponse)) {
+            $errJson = json_decode($rawResponse, true);
+            $errDetail = $errJson["error"] ?? $rawResponse;
+        }
+        error_log("Ollama HTTP Error ($httpCode): " . $errDetail);
+        return [
+            "error" => "Ollama HTTP $httpCode: " . ($errDetail ?: "Empty response"),
+            "text" => null
+        ];
     }
 
     $decoded = json_decode($rawResponse, true);
@@ -202,7 +224,9 @@ function streamAiChat(array $messages, $systemPrompt, callable $chunkCallback) {
         "model" => OLLAMA_MODEL,
         "messages" => $formattedMessages,
         "stream" => true,
+        "keep_alive" => "30m",
         "options" => [
+            "num_gpu" => 0,
             "temperature" => 0.4,
             "top_p" => 0.9,
             "num_predict" => 512
@@ -221,8 +245,8 @@ function streamAiChat(array $messages, $systemPrompt, callable $chunkCallback) {
             "Content-Type: application/json",
             "Content-Length: " . strlen($payload)
         ],
-        CURLOPT_CONNECTTIMEOUT => 2,
-        CURLOPT_TIMEOUT => 10,
+        CURLOPT_CONNECTTIMEOUT => 30,
+        CURLOPT_TIMEOUT => 300,
         CURLOPT_WRITEFUNCTION => function($curlHandle, $data) use ($chunkCallback) {
             $lines = explode("\n", $data);
             foreach ($lines as $line) {

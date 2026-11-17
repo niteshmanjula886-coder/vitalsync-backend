@@ -3,13 +3,17 @@
 $host = "localhost";
 $username = "root";
 $password = "";
-$database = "vitalsync_db";
+$database = "vitalsync";
 
 try {
-    $conn = new mysqli($host, $username, $password, $database);
+    $conn = @new mysqli($host, $username, $password, $database);
+    if ($conn->connect_error) {
+        $database = "vitalsync_db";
+        $conn = @new mysqli($host, $username, $password, $database);
+    }
 } catch (\Throwable $e) {
     try {
-        $database = "vitalsync";
+        $database = "vitalsync_db";
         $conn = new mysqli($host, $username, $password, $database);
     } catch (\Throwable $e2) {
         error_log("VitalSync database connection failed: " . $e2->getMessage());

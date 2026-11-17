@@ -8,14 +8,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit();
 $host = "localhost";
 $user = "root";
 $password = "";
-$database = "vitalsync_db";
+$database = "vitalsync";
 
-// Connect using MySQLi with automatic fallback to vitalsync if needed
+// Connect using MySQLi with automatic fallback to vitalsync_db if needed
 try {
-    $conn = new mysqli($host, $user, $password, $database);
+    $conn = @new mysqli($host, $user, $password, $database);
+    if ($conn->connect_error) {
+        $database = "vitalsync_db";
+        $conn = @new mysqli($host, $user, $password, $database);
+    }
 } catch (\Throwable $e) {
     try {
-        $database = "vitalsync";
+        $database = "vitalsync_db";
         $conn = new mysqli($host, $user, $password, $database);
     } catch (\Throwable $e2) {
         error_log("Database connection failed: " . $e2->getMessage());

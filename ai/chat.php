@@ -1,6 +1,7 @@
 <?php
 
-set_time_limit(180);
+set_time_limit(300);
+ini_set('max_execution_time', 300);
 require_once __DIR__ . "/../config/auth_middleware.php";
 require_once __DIR__ . "/ai_service.php";
 
@@ -91,8 +92,9 @@ if ($method === "GET") {
 }
 
 if ($method === "POST") {
-    $data = getInputData();
-    $userText = trim($data["message_text"] ?? $data["message"] ?? $data["text"] ?? "");
+    try {
+        $data = getInputData();
+        $userText = trim($data["message_text"] ?? $data["message"] ?? $data["text"] ?? "");
 
     if ($userText === "") {
         respondJson(400, [
@@ -275,6 +277,22 @@ if ($method === "POST") {
             "rag_sources" => $ragSourcesSummary
         ]
     ]);
+    } catch (\Throwable $e) {
+        error_log("VitalSync chat.php error: " . $e->getMessage());
+        respondJson(200, [
+            "success" => false,
+            "status" => "error",
+            "message" => "AI Service Error: " . $e->getMessage(),
+            "ai_response" => [
+                "id" => (string)time(),
+                "sessionId" => (int)($sessionId ?? 0),
+                "sender" => "AI",
+                "text" => "⚠️ VitalSync AI encountered an issue: " . $e->getMessage() . ". Please ensure Ollama is active and try again.",
+                "timeText" => date("h:i A"),
+                "model_used" => "vitalsync:error-fallback"
+            ]
+        ]);
+    }
 }
 
 if ($method === "DELETE") {

@@ -1,5 +1,7 @@
 <?php
 
+set_time_limit(300);
+ini_set('max_execution_time', 300);
 ini_set("display_errors", "0");
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Tunnel-Skip-Anti-Abuse");
@@ -227,7 +229,7 @@ if (isset($conn) && ($conn instanceof mysqli)) {
 }
 
 // Format system prompt establishing the persona
-$systemPrompt = "You are VitalSync AI, an authentic, supportive health and wellness assistant. Answer the user's question directly, concisely, and practically. Use the user's health metrics only when directly relevant to their question.";
+$systemPrompt = "You are VitalSync AI, an authentic, supportive health, nutrition, and wellness assistant. Answer the user's question directly, accurately, and practically. When discussing foods, ingredients, and dishes (such as Indian sweets like Palkova / Pal Kova, which is a traditional South Indian sweet made of evaporated milk and sugar), be accurate and avoid confusing them with unrelated cuisines. Provide concise wellness and nutritional guidance. Conclude all thoughts cleanly within 250 words. Use the user's health metrics only when directly relevant to their question.";
 
 $isMetricQuery = preg_match(
     '/\b(my metrics|my stats|my vitals|my data|today\'?s|water|hydration|drink|fluid|steps|walk|heart rate|bpm|pulse|spo2|oxygen|sleep|progress|summary|overview|status|readiness)\b/i',
@@ -345,10 +347,10 @@ $ollamaMessages[] = [
 ];
 
 /**
- * Dispatches an HTTP POST JSON request to the local Ollama server via cURL (connect timeout 10s,
- * request timeout 60s), falling back to native PHP HTTP streams when php_curl is unavailable in Apache.
+ * Dispatches an HTTP POST JSON request to the local Ollama server via cURL (connect timeout 30s,
+ * request timeout 300s), falling back to native PHP HTTP streams when php_curl is unavailable in Apache.
  */
-function dispatchOllamaChatRequest(string $url, array $payload, int $timeoutSeconds = 60): array {
+function dispatchOllamaChatRequest(string $url, array $payload, int $timeoutSeconds = 300): array {
     $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
     if ($jsonPayload === false) {
         return ["ok" => false, "http_code" => 0, "data" => null, "error" => "JSON encode failed: " . json_last_error_msg()];
@@ -366,7 +368,7 @@ function dispatchOllamaChatRequest(string $url, array $payload, int $timeoutSeco
         curl_setopt($ch, CURLOPT_HTTPHEADER, [
             "Content-Type: application/json; charset=utf-8"
         ]);
-        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 30);
         curl_setopt($ch, CURLOPT_TIMEOUT, $timeoutSeconds);
 
         $execRes = curl_exec($ch);
@@ -422,14 +424,15 @@ $ollamaPayload = [
     "model" => "qwen2.5:1.5b",
     "messages" => $ollamaMessages,
     "stream" => false,
-    "keep_alive" => "15m",
+    "keep_alive" => "30m",
     "options" => [
         "temperature" => 0.4,
-        "num_predict" => 260
+        "num_predict" => 512,
+        "num_gpu" => 0
     ]
 ];
 
-$ollamaResult = dispatchOllamaChatRequest($ollamaUrl, $ollamaPayload, 12);
+$ollamaResult = dispatchOllamaChatRequest($ollamaUrl, $ollamaPayload, 300);
 $ollamaData = $ollamaResult["data"];
 $reply = $ollamaResult["ok"]
     ? ($ollamaData["message"]["content"] ?? $ollamaData["response"] ?? null)

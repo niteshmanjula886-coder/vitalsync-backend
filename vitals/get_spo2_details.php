@@ -83,6 +83,7 @@ PROMPT;
         "stream" => false,
         "keep_alive" => "15m",
         "options" => [
+            "num_gpu" => 0,
             "temperature" => 0.2,
             "num_predict" => 240
         ]
@@ -98,8 +99,8 @@ PROMPT;
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => $payload,
             CURLOPT_HTTPHEADER => ["Content-Type: application/json"],
-            CURLOPT_CONNECTTIMEOUT => 2,
-            CURLOPT_TIMEOUT => 5
+            CURLOPT_CONNECTTIMEOUT => 3,
+            CURLOPT_TIMEOUT => 30
         ]);
         $rawResponse = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);

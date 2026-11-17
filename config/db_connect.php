@@ -11,7 +11,7 @@ if ($_SERVER["REQUEST_METHOD"] === "OPTIONS") {
 }
 
 $host = "localhost";
-$db   = "vitalsync_db";
+$db   = "vitalsync";
 $user = "root";
 $pass = "";
 $charset = "utf8mb4";
@@ -28,7 +28,7 @@ try {
     ensureVitalSyncCloudSyncSchema($pdo);
 } catch (\PDOException $e) {
     try {
-        $db = "vitalsync";
+        $db = "vitalsync_db";
         $dsn = "mysql:host=$host;dbname=$db;charset=$charset";
         $pdo = new PDO($dsn, $user, $pass, $options);
         ensureVitalSyncCloudSyncSchema($pdo);
