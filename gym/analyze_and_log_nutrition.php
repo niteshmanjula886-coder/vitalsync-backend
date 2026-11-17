@@ -1,6 +1,13 @@
 <?php
 
-require_once __DIR__ . "/../config/auth_middleware.php";
+header("Content-Type: application/json; charset=UTF-8");
+error_reporting(0);
+ini_set('display_errors', 0);
+
+$authPath = file_exists(__DIR__ . '/config/auth_middleware.php')
+    ? __DIR__ . '/config/auth_middleware.php'
+    : __DIR__ . '/../config/auth_middleware.php';
+require_once $authPath;
 
 $conn->query("
     CREATE TABLE IF NOT EXISTS gym_nutrition_logs (
