@@ -27,33 +27,64 @@ ini_set('max_execution_time', 300);
  *    - Structured JSON payload with messages (system prompt, conversation history, user prompt), stream=false, temperature=0.3
  */
 
-define("OLLAMA_BASE_URL", "http://127.0.0.1:11434");
+if (!defined("OLLAMA_BASE_URL")) {
+    define("OLLAMA_BASE_URL", "http://127.0.0.1:11434");
+}
 define("OLLAMA_MODEL", "qwen2.5:1.5b");
 define("OLLAMA_TIMEOUT_SECONDS", 300);
 
 /**
- * Checks if local Ollama daemon is reachable on port 11434.
+ * Returns list of adaptable Ollama host candidates
  */
-function isOllamaReachable() {
-    if (function_exists("curl_init")) {
-        $ch = curl_init(OLLAMA_BASE_URL . "/");
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 4,
-            CURLOPT_CONNECTTIMEOUT => 3,
-            CURLOPT_NOBODY => true
-        ]);
-        curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-        return ($httpCode >= 200 && $httpCode < 400);
+function getOllamaCandidateUrls(): array {
+    $hosts = [];
+    $envHost = trim((string)getenv("OLLAMA_HOST"));
+    if ($envHost !== "") {
+        $hosts[] = preg_match('#^https?://#i', $envHost) ? $envHost : "http://" . $envHost;
     }
-    $errno = 0;
-    $errstr = "";
-    $sock = @fsockopen("127.0.0.1", 11434, $errno, $errstr, 3);
-    if ($sock) {
-        fclose($sock);
-        return true;
+    $hosts[] = "http://127.0.0.1:11434";
+    $hosts[] = "http://localhost:11434";
+    $localIp = gethostbyname(gethostname());
+    if ($localIp && $localIp !== "127.0.0.1" && $localIp !== "localhost") {
+        $hosts[] = "http://{$localIp}:11434";
+    }
+    return array_unique($hosts);
+}
+
+/**
+ * Checks if local or adaptable Ollama daemon is reachable.
+ */
+function isOllamaReachable(&$resolvedBaseUrl = null) {
+    $candidates = getOllamaCandidateUrls();
+    foreach ($candidates as $candidate) {
+        $target = rtrim($candidate, "/");
+        if (function_exists("curl_init")) {
+            $ch = curl_init($target . "/");
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 3,
+                CURLOPT_CONNECTTIMEOUT => 2,
+                CURLOPT_NOBODY => true
+            ]);
+            curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+            if ($httpCode >= 200 && $httpCode < 400) {
+                $resolvedBaseUrl = $target;
+                return true;
+            }
+        }
+        $errno = 0;
+        $errstr = "";
+        $parsed = parse_url($target);
+        $host = $parsed["host"] ?? "127.0.0.1";
+        $port = (int)($parsed["port"] ?? 11434);
+        $sock = @fsockopen($host, $port, $errno, $errstr, 2);
+        if ($sock) {
+            fclose($sock);
+            $resolvedBaseUrl = $target;
+            return true;
+        }
     }
     return false;
 }
@@ -99,8 +130,11 @@ function callAiChat(array $messages, $systemPrompt = "") {
     $httpCode = 0;
     $curlErr = "";
 
+    $resolvedUrl = OLLAMA_BASE_URL;
+    isOllamaReachable($resolvedUrl);
+
     if (function_exists("curl_init")) {
-        $ch = curl_init(OLLAMA_BASE_URL . "/api/chat");
+        $ch = curl_init(rtrim($resolvedUrl, "/") . "/api/chat");
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST => true,
@@ -109,7 +143,7 @@ function callAiChat(array $messages, $systemPrompt = "") {
                 "Content-Type: application/json",
                 "Content-Length: " . strlen($payload)
             ],
-            CURLOPT_CONNECTTIMEOUT => 30,
+            CURLOPT_CONNECTTIMEOUT => 15,
             CURLOPT_TIMEOUT => 300
         ]);
 
@@ -120,7 +154,10 @@ function callAiChat(array $messages, $systemPrompt = "") {
     } else {
         $errno = 0;
         $errstr = "";
-        $sock = @fsockopen("127.0.0.1", 11434, $errno, $errstr, 10);
+        $parsed = parse_url($resolvedUrl);
+        $host = $parsed["host"] ?? "127.0.0.1";
+        $port = (int)($parsed["port"] ?? 11434);
+        $sock = @fsockopen($host, $port, $errno, $errstr, 5);
         if ($sock) {
             fclose($sock);
             $ctx = stream_context_create([
@@ -132,7 +169,7 @@ function callAiChat(array $messages, $systemPrompt = "") {
                     "ignore_errors" => true
                 ]
             ]);
-            $rawResponse = @file_get_contents(OLLAMA_BASE_URL . "/api/chat", false, $ctx);
+            $rawResponse = @file_get_contents(rtrim($resolvedUrl, "/") . "/api/chat", false, $ctx);
             if ($rawResponse !== false) {
                 $httpCode = 200;
             }
