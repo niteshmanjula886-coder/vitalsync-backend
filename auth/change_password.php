@@ -3,18 +3,24 @@
 header("Content-Type: application/json; charset=UTF-8");
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: POST, OPTIONS");
-header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
+header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Tunnel-Skip-Anti-Abuse");
 
 if ($_SERVER["REQUEST_METHOD"] === "OPTIONS") {
     http_response_code(200);
     exit;
 }
 
-require_once __DIR__ . "/../config/db.php";
+if (file_exists(__DIR__ . "/../config/db.php")) {
+    require_once __DIR__ . "/../config/db.php";
+} elseif (file_exists(__DIR__ . "/../db_connect.php")) {
+    require_once __DIR__ . "/../db_connect.php";
+} elseif (file_exists(__DIR__ . "/db_connect.php")) {
+    require_once __DIR__ . "/db_connect.php";
+}
 
 function respond($status, $data) {
     http_response_code($status);
-    echo json_encode($data);
+    echo json_encode($data, JSON_UNESCAPED_SLASHES);
     exit;
 }
 
@@ -27,7 +33,11 @@ if ($_SERVER["REQUEST_METHOD"] !== "POST") {
 }
 
 $rawInput = file_get_contents("php://input");
-$data = json_decode($rawInput, true);
+if ($rawInput !== false && $rawInput !== null) {
+    $rawInput = preg_replace('/^\xEF\xBB\xBF/', '', $rawInput);
+    $rawInput = trim($rawInput);
+}
+$data = !empty($rawInput) ? json_decode($rawInput, true) : null;
 if (!is_array($data)) {
     $data = $_POST;
 }
@@ -42,20 +52,20 @@ if (!is_array($data) || empty($data)) {
 $userId = isset($data["user_id"]) ? (int)$data["user_id"] : (isset($data["id"]) ? (int)$data["id"] : 0);
 $email = strtolower(trim($data["email"] ?? ""));
 $currentPassword = $data["current_password"] ?? "";
-$newPassword = $data["new_password"] ?? "";
-$confirmPassword = $data["confirm_password"] ?? "";
+$newPassword = $data["new_password"] ?? $data["password"] ?? "";
+$confirmPassword = $data["confirm_password"] ?? $newPassword;
 
 if ($userId <= 0 && $email === "") {
     respond(400, [
         "success" => false,
-        "message" => "user_id or email is required to identify the user"
+        "message" => "Account email or user ID is required"
     ]);
 }
 
-if (!is_string($currentPassword) || $currentPassword === "") {
+if ($email !== "" && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
     respond(400, [
         "success" => false,
-        "message" => "Current password is required"
+        "message" => "Enter a valid email address"
     ]);
 }
 
@@ -66,7 +76,7 @@ if (!is_string($newPassword) || strlen($newPassword) < 6 || strlen($newPassword)
     ]);
 }
 
-if ($newPassword !== $confirmPassword) {
+if ($confirmPassword !== "" && $newPassword !== $confirmPassword) {
     respond(400, [
         "success" => false,
         "message" => "New passwords do not match"
@@ -75,10 +85,10 @@ if ($newPassword !== $confirmPassword) {
 
 // Find user
 if ($userId > 0) {
-    $stmt = $conn->prepare("SELECT id, password_hash FROM users WHERE id = ? LIMIT 1");
+    $stmt = $conn->prepare("SELECT id, email, password_hash FROM users WHERE id = ? LIMIT 1");
     $stmt->bind_param("i", $userId);
 } else {
-    $stmt = $conn->prepare("SELECT id, password_hash FROM users WHERE email = ? LIMIT 1");
+    $stmt = $conn->prepare("SELECT id, email, password_hash FROM users WHERE email = ? LIMIT 1");
     $stmt->bind_param("s", $email);
 }
 
@@ -101,12 +111,14 @@ if (!$user) {
     ]);
 }
 
-// Verify current password
-if (!password_verify($currentPassword, $user["password_hash"])) {
-    respond(401, [
-        "success" => false,
-        "message" => "Current password is incorrect"
-    ]);
+// If current password was provided, verify it matches the current password
+if (is_string($currentPassword) && $currentPassword !== "") {
+    if (!password_verify($currentPassword, $user["password_hash"])) {
+        respond(401, [
+            "success" => false,
+            "message" => "Current password is incorrect"
+        ]);
+    }
 }
 
 // Check if new password is identical to current
@@ -117,7 +129,7 @@ if (password_verify($newPassword, $user["password_hash"])) {
     ]);
 }
 
-// Update password
+// Update password with secure hash
 $newHash = password_hash($newPassword, PASSWORD_DEFAULT);
 $targetId = (int)$user["id"];
 
@@ -148,4 +160,3 @@ respond(500, [
     "success" => false,
     "message" => "Unable to change password"
 ]);
-
