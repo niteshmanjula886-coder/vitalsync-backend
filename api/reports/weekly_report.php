@@ -850,6 +850,40 @@ if (count($activeScores) > 0) {
 $wellnessStatus = ($wellnessScore >= 80) ? "Optimal" : (($wellnessScore >= 50) ? "Good Progress" : ($wellnessScore > 0 ? "Needs Attention" : "No Data"));
 
 // -------------------------------------------------------------------------
+// 9b. Weekly Nutrition Aggregation (Sum across Breakfast, Lunch, Dinner, Snacks)
+// -------------------------------------------------------------------------
+$weeklyTotalNutritionCal = 0;
+$weeklyTotalNutritionProtein = 0.0;
+$weeklyTotalNutritionCarbs = 0.0;
+$weeklyTotalNutritionFats = 0.0;
+$weeklyMealsCount = 0;
+
+$nutrQ = $conn->prepare("
+    SELECT 
+        COUNT(id) AS meals_count,
+        COALESCE(SUM(calories), 0) AS total_cal,
+        COALESCE(SUM(protein_g), 0) AS total_prot,
+        COALESCE(SUM(carbs_g), 0) AS total_carbs,
+        COALESCE(SUM(fats_g), 0) AS total_fats
+    FROM gym_nutrition_logs
+    WHERE user_id = ? AND DATE(created_at) BETWEEN ? AND ?
+");
+if ($nutrQ) {
+    $nutrQ->bind_param("iss", $userId, $weekStart, $weekEnd);
+    $nutrQ->execute();
+    $nRow = $nutrQ->get_result()->fetch_assoc();
+    $nutrQ->close();
+    if ($nRow) {
+        $weeklyMealsCount = (int)($nRow["meals_count"] ?? 0);
+        $weeklyTotalNutritionCal = (int)($nRow["total_cal"] ?? 0);
+        $weeklyTotalNutritionProtein = round((float)($nRow["total_prot"] ?? 0.0), 1);
+        $weeklyTotalNutritionCarbs = round((float)($nRow["total_carbs"] ?? 0.0), 1);
+        $weeklyTotalNutritionFats = round((float)($nRow["total_fats"] ?? 0.0), 1);
+    }
+}
+$weeklyAvgNutritionCal = (int)round($weeklyTotalNutritionCal / 7.0);
+
+// -------------------------------------------------------------------------
 // 10. Vital Performance Breakdown (Strictly 7-Day Weekly Aggregated Formats)
 // -------------------------------------------------------------------------
 $vitalPerformanceBreakdown = [
@@ -972,6 +1006,18 @@ $weeklyTrends = [
         "formatted_value" => ($avgSys !== null && $avgDia !== null) ? "{$avgSys}/{$avgDia} mmHg wk avg • {$bpCategory}" : "--/-- wk avg",
         "status" => $bpCategory,
         "score" => $bpScore
+    ],
+    "nutrition" => [
+        "total_calories" => $weeklyTotalNutritionCal,
+        "avg_calories" => $weeklyAvgNutritionCal,
+        "total_protein_g" => $weeklyTotalNutritionProtein,
+        "total_carbs_g" => $weeklyTotalNutritionCarbs,
+        "total_fats_g" => $weeklyTotalNutritionFats,
+        "meals_count" => $weeklyMealsCount,
+        "formatted_value" => "{$weeklyTotalNutritionCal} kcal wk total ({$weeklyAvgNutritionCal} kcal/day) • {$weeklyMealsCount} meals logged across all categories",
+        "title_value" => "{$weeklyAvgNutritionCal} kcal/day",
+        "subtitle" => "{$weeklyTotalNutritionProtein}g Protein • {$weeklyMealsCount} meals",
+        "status" => $weeklyMealsCount > 0 ? "Active ({$weeklyMealsCount} meals)" : "No meals logged"
     ]
 ];
 

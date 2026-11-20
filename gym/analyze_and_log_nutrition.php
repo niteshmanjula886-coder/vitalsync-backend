@@ -13,7 +13,7 @@ $conn->query("
     CREATE TABLE IF NOT EXISTS gym_nutrition_logs (
         id INT AUTO_INCREMENT PRIMARY KEY,
         user_id INT NOT NULL,
-        meal_type VARCHAR(50) NOT NULL,
+        meal_type VARCHAR(50) NOT NULL DEFAULT 'Breakfast',
         food_description TEXT NOT NULL,
         calories INT NOT NULL DEFAULT 0,
         protein_g FLOAT NOT NULL DEFAULT 0,
@@ -21,14 +21,30 @@ $conn->query("
         fats_g FLOAT NOT NULL DEFAULT 0,
         ai_feedback TEXT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_user_created (user_id, created_at)
+        INDEX idx_user_created (user_id, created_at),
+        INDEX idx_user_meal (user_id, meal_type)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ");
+
+$colCheck = $conn->query("SHOW COLUMNS FROM gym_nutrition_logs LIKE 'meal_type'");
+if ($colCheck && $colCheck->num_rows == 0) {
+    $conn->query("ALTER TABLE gym_nutrition_logs ADD COLUMN meal_type VARCHAR(50) NOT NULL DEFAULT 'Breakfast' AFTER user_id");
+}
 
 $userId = resolveUserIdOrDie($conn, true);
 $input = getInputData();
 
-$mealType = trim($input["meal_type"] ?? $input["mealType"] ?? "Lunch");
+$rawMealType = trim($input["meal_type"] ?? $input["mealType"] ?? "Breakfast");
+$lowerType = strtolower($rawMealType);
+if (strpos($lowerType, 'breakfast') !== false) {
+    $mealType = "Breakfast";
+} elseif (strpos($lowerType, 'lunch') !== false) {
+    $mealType = "Lunch";
+} elseif (strpos($lowerType, 'dinner') !== false) {
+    $mealType = "Dinner";
+} else {
+    $mealType = "Snacks";
+}
 $foodDesc = trim($input["food_description"] ?? $input["food_name"] ?? $input["foodDescription"] ?? "");
 $saveManually = !empty($input["save_manually"]) || !empty($input["saveManually"]);
 

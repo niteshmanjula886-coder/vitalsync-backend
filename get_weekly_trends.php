@@ -10,7 +10,10 @@ if ($_SERVER["REQUEST_METHOD"] === "OPTIONS") {
     exit;
 }
 
-require_once __DIR__ . "/../../config/auth_middleware.php";
+$authPath = file_exists(__DIR__ . '/config/auth_middleware.php')
+    ? __DIR__ . '/config/auth_middleware.php'
+    : __DIR__ . '/../config/auth_middleware.php';
+require_once $authPath;
 
 $userId = resolveUserIdOrDie($conn, true);
 $method = $_SERVER["REQUEST_METHOD"];
