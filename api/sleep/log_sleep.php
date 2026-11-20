@@ -15,6 +15,49 @@ if ($method !== "POST") {
 
 $input = getInputData();
 
+// Support Sleep Reset (Clear log back to 0h)
+if (
+    $method === "DELETE" ||
+    (isset($_GET["action"]) && strtolower($_GET["action"]) === "reset") ||
+    (isset($input["action"]) && strtolower($input["action"]) === "reset")
+) {
+    $targetDate = trim($_GET["date"] ?? ($input["logged_date"] ?? ($input["date"] ?? date("Y-m-d"))));
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $targetDate)) {
+        $targetDate = date("Y-m-d");
+    }
+
+    $delRec = $conn->prepare("DELETE FROM sleep_records WHERE user_id = ? AND date_string = ?");
+    if ($delRec) {
+        $delRec->bind_param("is", $userId, $targetDate);
+        $delRec->execute();
+        $delRec->close();
+    }
+
+    $delLog = $conn->prepare("DELETE FROM sleep_logs WHERE user_id = ? AND (logged_at = ? OR logged_date = ? OR DATE(start_time) = ?)");
+    if ($delLog) {
+        $delLog->bind_param("isss", $userId, $targetDate, $targetDate, $targetDate);
+        $delLog->execute();
+        $delLog->close();
+    }
+
+    $delVit = $conn->prepare("DELETE FROM vitals_readings WHERE user_id = ? AND reading_type = 'sleep' AND (reading_date = ? OR DATE(created_at) = ?)");
+    if ($delVit) {
+        $delVit->bind_param("iss", $userId, $targetDate, $targetDate);
+        $delVit->execute();
+        $delVit->close();
+    }
+
+    $conn->close();
+    respondJson(200, [
+        "status" => "success",
+        "message" => "Sleep record reset to 0h successfully",
+        "data" => [
+            "duration_minutes" => 0,
+            "logged_date" => $targetDate
+        ]
+    ]);
+}
+
 $bedtime = trim((string)($input["bedtime"] ?? "23:00"));
 $wakeTime = trim((string)($input["wake_time"] ?? "07:00"));
 $durationMinutes = isset($input["duration_minutes"]) ? (int)$input["duration_minutes"] : 0;

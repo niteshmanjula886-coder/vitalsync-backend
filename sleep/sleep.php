@@ -26,17 +26,78 @@ function evaluateSleepQualityMeta(int $durationMinutes): array {
 $userId = resolveUserIdOrDie($conn, true);
 $method = $_SERVER["REQUEST_METHOD"];
 
+// Support Sleep Reset (Clear log back to 0h)
+$inputData = ($method === "POST" || $method === "PUT" || $method === "DELETE") ? getInputData() : [];
+$isResetAction = (
+    $method === "DELETE" ||
+    (isset($_GET["action"]) && strtolower($_GET["action"]) === "reset") ||
+    (isset($inputData["action"]) && strtolower($inputData["action"]) === "reset")
+);
+
+if ($isResetAction) {
+    $targetDate = trim($_GET["date"] ?? ($inputData["date_string"] ?? ($inputData["date"] ?? date("Y-m-d"))));
+    if (empty($targetDate)) {
+        $targetDate = date("Y-m-d");
+    }
+
+    // 1. Delete from sleep_records
+    $delRec = $conn->prepare("DELETE FROM sleep_records WHERE user_id = ? AND date_string = ?");
+    if ($delRec) {
+        $delRec->bind_param("is", $userId, $targetDate);
+        $delRec->execute();
+        $delRec->close();
+    }
+
+    // 2. Delete from sleep_logs
+    $delLog = $conn->prepare("DELETE FROM sleep_logs WHERE user_id = ? AND (logged_at = ? OR logged_date = ? OR DATE(start_time) = ?)");
+    if ($delLog) {
+        $delLog->bind_param("isss", $userId, $targetDate, $targetDate, $targetDate);
+        $delLog->execute();
+        $delLog->close();
+    }
+
+    // 3. Clear from vitals_readings for sleep on this date
+    $delVit = $conn->prepare("DELETE FROM vitals_readings WHERE user_id = ? AND reading_type = 'sleep' AND (reading_date = ? OR DATE(created_at) = ?)");
+    if ($delVit) {
+        $delVit->bind_param("iss", $userId, $targetDate, $targetDate);
+        $delVit->execute();
+        $delVit->close();
+    }
+
+    $conn->close();
+    respondJson(200, [
+        "success" => true,
+        "message" => "Sleep record reset to 0h successfully",
+        "date" => $targetDate,
+        "duration_minutes" => 0,
+        "sleep_score" => 0,
+        "quality" => "No record",
+        "quality_label" => "No record"
+    ]);
+}
+
 if ($method === "GET") {
     $date = trim($_GET["date"] ?? date("Y-m-d"));
+    $allowPastFallback = isset($_GET["latest"]) && ($_GET["latest"] === "1" || $_GET["latest"] === "true");
 
-    // Fetch record for requested date or latest
-    $stmt = $conn->prepare(
-        "SELECT id, date_string, duration_minutes, sleep_score, quality_label, bedtime, wake_time, deep_sleep_minutes, light_sleep_minutes, rem_sleep_minutes, awake_minutes, created_at 
-         FROM sleep_records 
-         WHERE user_id = ? AND (date_string = ? OR date_string <= ?) 
-         ORDER BY date_string DESC LIMIT 1"
-    );
-    $stmt->bind_param("iss", $userId, $date, $date);
+    // Fetch record for requested date (or fallback if explicitly requested)
+    if ($allowPastFallback) {
+        $stmt = $conn->prepare(
+            "SELECT id, date_string, duration_minutes, sleep_score, quality_label, bedtime, wake_time, deep_sleep_minutes, light_sleep_minutes, rem_sleep_minutes, awake_minutes, created_at 
+             FROM sleep_records 
+             WHERE user_id = ? AND (date_string = ? OR date_string <= ?) 
+             ORDER BY date_string DESC LIMIT 1"
+        );
+        $stmt->bind_param("iss", $userId, $date, $date);
+    } else {
+        $stmt = $conn->prepare(
+            "SELECT id, date_string, duration_minutes, sleep_score, quality_label, bedtime, wake_time, deep_sleep_minutes, light_sleep_minutes, rem_sleep_minutes, awake_minutes, created_at 
+             FROM sleep_records 
+             WHERE user_id = ? AND date_string = ? 
+             LIMIT 1"
+        );
+        $stmt->bind_param("is", $userId, $date);
+    }
     $stmt->execute();
     $rec = $stmt->get_result()->fetch_assoc();
     $stmt->close();
@@ -51,11 +112,20 @@ if ($method === "GET") {
     $rem = $rec ? (int)$rec["rem_sleep_minutes"] : 0;
     $awake = $rec ? (int)$rec["awake_minutes"] : 0;
 
-    // Fallback to sleep_logs if sleep_records empty
+    // Fallback to sleep_logs if sleep_records empty for this exact date
     if ($durationMin <= 0) {
-        $slStmt = $conn->prepare("SELECT id, start_time, end_time, duration_minutes, quality_score, bedtime, wake_time, COALESCE(logged_at, logged_date, DATE(start_time)) AS log_date FROM sleep_logs WHERE user_id = ? AND (logged_at = ? OR logged_at <= ? OR logged_date = ? OR logged_date <= ?) ORDER BY COALESCE(logged_at, logged_date, DATE(start_time)) DESC LIMIT 1");
+        if ($allowPastFallback) {
+            $slStmt = $conn->prepare("SELECT id, start_time, end_time, duration_minutes, quality_score, bedtime, wake_time, COALESCE(logged_at, logged_date, DATE(start_time)) AS log_date FROM sleep_logs WHERE user_id = ? AND (logged_at = ? OR logged_at <= ? OR logged_date = ? OR logged_date <= ?) ORDER BY COALESCE(logged_at, logged_date, DATE(start_time)) DESC LIMIT 1");
+            if ($slStmt) {
+                $slStmt->bind_param("issss", $userId, $date, $date, $date, $date);
+            }
+        } else {
+            $slStmt = $conn->prepare("SELECT id, start_time, end_time, duration_minutes, quality_score, bedtime, wake_time, COALESCE(logged_at, logged_date, DATE(start_time)) AS log_date FROM sleep_logs WHERE user_id = ? AND (logged_at = ? OR logged_date = ? OR DATE(start_time) = ?) LIMIT 1");
+            if ($slStmt) {
+                $slStmt->bind_param("isss", $userId, $date, $date, $date);
+            }
+        }
         if ($slStmt) {
-            $slStmt->bind_param("issss", $userId, $date, $date, $date, $date);
             $slStmt->execute();
             $slRec = $slStmt->get_result()->fetch_assoc();
             $slStmt->close();
