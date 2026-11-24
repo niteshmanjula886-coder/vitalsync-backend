@@ -250,5 +250,67 @@ if ($method === "POST") {
     ]);
 }
 
+if ($method === "DELETE") {
+    $sessionUuid = trim($_GET["session_uuid"] ?? $_GET["uuid"] ?? "");
+    $sessionId = isset($_GET["id"]) ? (int)$_GET["id"] : 0;
+
+    if ($sessionUuid !== "" || $sessionId > 0) {
+        $deletedWorkout = 0;
+        $deletedActivity = 0;
+
+        if ($sessionUuid !== "") {
+            $stmt1 = $conn->prepare("DELETE FROM workout_sessions WHERE user_id = ? AND session_uuid = ?");
+            if ($stmt1) {
+                $stmt1->bind_param("is", $userId, $sessionUuid);
+                $stmt1->execute();
+                $deletedWorkout += $stmt1->affected_rows;
+                $stmt1->close();
+            }
+        }
+
+        if ($sessionId > 0) {
+            $stmt1 = $conn->prepare("DELETE FROM workout_sessions WHERE user_id = ? AND id = ?");
+            if ($stmt1) {
+                $stmt1->bind_param("ii", $userId, $sessionId);
+                $stmt1->execute();
+                $deletedWorkout += $stmt1->affected_rows;
+                $stmt1->close();
+            }
+            $stmt2 = $conn->prepare("DELETE FROM activity_sessions WHERE user_id = ? AND id = ?");
+            if ($stmt2) {
+                $stmt2->bind_param("ii", $userId, $sessionId);
+                $stmt2->execute();
+                $deletedActivity += $stmt2->affected_rows;
+                $stmt2->close();
+            }
+        }
+
+        $conn->close();
+        respondJson(200, [
+            "success" => true,
+            "message" => "Activity session deleted successfully",
+            "deleted_count" => $deletedWorkout + $deletedActivity
+        ]);
+    } else {
+        $stmt1 = $conn->prepare("DELETE FROM workout_sessions WHERE user_id = ?");
+        if ($stmt1) {
+            $stmt1->bind_param("i", $userId);
+            $stmt1->execute();
+            $stmt1->close();
+        }
+        $stmt2 = $conn->prepare("DELETE FROM activity_sessions WHERE user_id = ?");
+        if ($stmt2) {
+            $stmt2->bind_param("i", $userId);
+            $stmt2->execute();
+            $stmt2->close();
+        }
+        $conn->close();
+        respondJson(200, [
+            "success" => true,
+            "message" => "Activity history cleared successfully"
+        ]);
+    }
+}
+
 respondJson(405, ["success" => false, "message" => "Method not allowed"]);
 
