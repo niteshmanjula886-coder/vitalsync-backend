@@ -228,28 +228,28 @@ if (isset($conn) && ($conn instanceof mysqli)) {
     }
 }
 
-// Format system prompt establishing the persona
-$systemPrompt = "You are VitalSync AI, an authentic, supportive health, nutrition, and wellness assistant. Answer the user's question directly, accurately, and practically. When discussing foods, ingredients, and dishes (such as Indian sweets like Palkova / Pal Kova, which is a traditional South Indian sweet made of evaporated milk and sugar), be accurate and avoid confusing them with unrelated cuisines. Provide concise wellness and nutritional guidance. Conclude all thoughts cleanly within 250 words. Use the user's health metrics only when directly relevant to their question.";
+// Fetch comprehensive DB telemetry + merge live_context from Android client
+$healthContext = (isset($conn) && ($conn instanceof mysqli))
+    ? fetchUserHealthContext($conn, $userId)
+    : [];
+$clientLiveContext = trim((string)($input["live_context"] ?? $input["liveContext"] ?? ""));
+$ragArticles = (isset($conn) && ($conn instanceof mysqli))
+    ? searchKnowledgeBase($conn, $userMessage, 1)
+    : [];
 
-$isMetricQuery = preg_match(
-    '/\b(my metrics|my stats|my vitals|my data|today\'?s|water|hydration|drink|fluid|steps|walk|heart rate|bpm|pulse|spo2|oxygen|sleep|progress|summary|overview|status|readiness)\b/i',
-    $userMessage
-) === 1;
+$systemPrompt = buildGeneralAiSystemPrompt($healthContext, $ragArticles, true, $clientLiveContext);
 
-if ($isMetricQuery) {
-    $telemetryContext = [];
-    if ($latestHeartRate !== null) {
-        $telemetryContext[] = "Today's Heart Rate: {$latestHeartRate} bpm";
-    }
-    if ($latestSpo2 !== null) {
-        $telemetryContext[] = "Today's SpO2: {$latestSpo2}%";
-    }
-    $telemetryContext[] = "Today's Water Intake: {$todayHydrationMl} / {$targetHydrationMl} ml";
-
-    if (!empty($telemetryContext)) {
-        $systemPrompt .= "\nUser's today metrics (reference only when relevant): " . implode("; ", $telemetryContext) . ".";
-    }
-}
+$todaySteps = (int)($healthContext["steps_current"] ?? 0);
+$targetSteps = (int)($healthContext["steps_target"] ?? 10000);
+$todayHydrationMl = (int)($healthContext["water_current_ml"] ?? 0);
+$targetHydrationMl = (int)($healthContext["water_target_ml"] ?? 2500);
+$userName = $healthContext["name"] ?? "there";
+$userBmi = is_numeric($healthContext["bmi_value"] ?? null) ? (float)$healthContext["bmi_value"] : 0.0;
+$latestHeartRate = is_numeric($healthContext["hr_current"] ?? null) ? (int)$healthContext["hr_current"] : null;
+$latestSpo2 = is_numeric($healthContext["spo2_numeric"] ?? null) ? (int)$healthContext["spo2_numeric"] : null;
+$latestBp = ($healthContext["blood_pressure"] ?? "NOT_RECORDED") !== "NOT_RECORDED" ? $healthContext["blood_pressure"] : null;
+$todayDistanceKm = (float)($healthContext["today_distance_km"] ?? 0.0);
+$todayCalories = (int)($healthContext["today_activity_calories"] ?? 0);
 
 $sessionId = $requestedSessionId;
 $sessionTitle = "New Chat";
@@ -302,8 +302,18 @@ if (isset($conn) && ($conn instanceof mysqli)) {
 }
 
 $priorHistory = (isset($conn) && ($conn instanceof mysqli) && $sessionId > 0)
-    ? loadConversationHistory($conn, $userId, 4, $sessionId)
+    ? loadConversationHistory($conn, $userId, 10, $sessionId)
     : [];
+if (empty($priorHistory) && !empty($input["conversation_history"]) && is_array($input["conversation_history"])) {
+    $clientHist = array_slice($input["conversation_history"], -10);
+    foreach ($clientHist as $ch) {
+        if (!is_array($ch)) continue;
+        $cText = trim((string)($ch["content"] ?? ""));
+        if ($cText === "") continue;
+        $cRole = (strtolower(trim((string)($ch["role"] ?? "user"))) === "assistant") ? "assistant" : "user";
+        $priorHistory[] = ["role" => $cRole, "content" => $cText];
+    }
+}
 
 // Save user message immediately so no conversation is ever lost
 if (isset($conn) && ($conn instanceof mysqli)) {
@@ -468,7 +478,9 @@ $ollamaPayload = [
     "stream" => false,
     "keep_alive" => "30m",
     "options" => [
-        "temperature" => 0.4,
+        "temperature" => 0.25,
+        "top_p" => 0.9,
+        "repeat_penalty" => 1.1,
         "num_predict" => 512,
         "num_gpu" => 0
     ]
@@ -576,7 +588,10 @@ if (empty($reply) || trim((string)$reply) === "") {
 }
 
 $cleanReply = trim(str_replace(["\r\n", "\r"], "\n", (string)$reply));
-$cleanReply = preg_replace('/\n{3,}/', "\n\n", $cleanReply);
+$cleanReply = preg_replace('/<think>[\s\S]*?<\/think>/i', '', $cleanReply);
+$cleanReply = preg_replace('/\[(LIVE_USER_SNAPSHOT|END_TELEMETRY|NUTRITION REFERENCE BASELINES|MACRO CALCULATION RULES)\]/i', '', $cleanReply);
+$cleanReply = preg_replace('/\b(qwen2\.5(:1\.5b)?|qwen3(:4b)?|ollama)\b/i', 'VitalSync AI', $cleanReply);
+$cleanReply = trim(preg_replace('/\n{3,}/', "\n\n", $cleanReply));
 
 // Persist AI response linked to the same session_id
 if (isset($conn) && ($conn instanceof mysqli)) {

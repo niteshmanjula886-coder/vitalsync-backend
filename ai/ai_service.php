@@ -120,8 +120,9 @@ function callAiChat(array $messages, $systemPrompt = "") {
         "keep_alive" => "30m",
         "options" => [
             "num_gpu" => 0,
-            "temperature" => 0.4,
+            "temperature" => 0.25,
             "top_p" => 0.9,
+            "repeat_penalty" => 1.1,
             "num_predict" => 512
         ]
     ]);
@@ -203,33 +204,11 @@ function callAiChat(array $messages, $systemPrompt = "") {
         return null;
     }
 
-    // Clean up any trailing hanging bullet points or unclosed headers
+    // Strip any internal thinking tags, system block markers, and trailing hanging bullets
+    $content = preg_replace('/<think>[\s\S]*?<\/think>/i', '', $content);
+    $content = preg_replace('/\[(LIVE_USER_SNAPSHOT|END_TELEMETRY|NUTRITION REFERENCE BASELINES|MACRO CALCULATION RULES|PATIENT REAL-TIME TELEMETRY SNAPSHOT)\]/i', '', $content);
     $content = preg_replace('/(\n\s*[-*•]\s*(\*\*[^*]*\*\*:?)?\s*)$/', '', $content);
     $content = trim($content);
-
-    // Hardware Disconnection Rule Guarantee:
-    // If the user asked about a vital metric that is NOT_RECORDED, ensure the exact required instruction is delivered
-    $latestUserMsg = "";
-    for ($i = count($messages) - 1; $i >= 0; $i--) {
-        if (($messages[$i]["role"] ?? "") === "user") {
-            $latestUserMsg = strtolower($messages[$i]["content"] ?? "");
-            break;
-        }
-    }
-
-    if (preg_match('/\b(heart|rate|bpm|pulse)\b/i', $latestUserMsg) && strpos($systemPrompt, "Heart Rate: NOT_RECORDED") !== false) {
-        if (strpos($content, "Settings > Connected Devices") === false || strpos($content, "not been recorded yet") === false) {
-            $content = "Your Heart Rate has not been recorded yet. Please connect your compatible smartwatch or health tracker via Settings > Connected Devices to enable live monitoring.";
-        }
-    } elseif (preg_match('/\b(blood pressure|bp|systolic|diastolic)\b/i', $latestUserMsg) && strpos($systemPrompt, "Blood Pressure: NOT_RECORDED") !== false) {
-        if (strpos($content, "Settings > Connected Devices") === false || strpos($content, "not been recorded yet") === false) {
-            $content = "Your Blood Pressure has not been recorded yet. Please connect your compatible smartwatch or health tracker via Settings > Connected Devices to enable live monitoring.";
-        }
-    } elseif (preg_match('/\b(spo2|oxygen|saturation)\b/i', $latestUserMsg) && strpos($systemPrompt, "SpO2: NOT_RECORDED") !== false) {
-        if (strpos($content, "Settings > Connected Devices") === false || strpos($content, "not been recorded yet") === false) {
-            $content = "Your SpO2 has not been recorded yet. Please connect your compatible smartwatch or health tracker via Settings > Connected Devices to enable live monitoring.";
-        }
-    }
 
     return [
         "text" => $content,
@@ -264,8 +243,9 @@ function streamAiChat(array $messages, $systemPrompt, callable $chunkCallback) {
         "keep_alive" => "30m",
         "options" => [
             "num_gpu" => 0,
-            "temperature" => 0.4,
+            "temperature" => 0.25,
             "top_p" => 0.9,
+            "repeat_penalty" => 1.1,
             "num_predict" => 512
         ]
     ]);
@@ -436,9 +416,9 @@ function isUserPersonalHealthQuery($query) {
 }
 
 /**
- * Loads recent multi-turn conversation memory, optionally scoped to a chat session.
+ * Loads recent multi-turn conversation memory (default 10 turns), optionally scoped to a chat session.
  */
-function loadConversationHistory($conn, $userId, $limit = 6, $sessionId = null) {
+function loadConversationHistory($conn, $userId, $limit = 10, $sessionId = null) {
     if ($sessionId !== null && (int)$sessionId > 0) {
         $stmt = $conn->prepare(
             "SELECT sender, COALESCE(NULLIF(message_text, ''), message) AS msg_content 
@@ -489,17 +469,27 @@ function fetchUserHealthContext($conn, $userId) {
         "bmi_value" => "NOT_RECORDED",
         "bmi_category" => "NOT_RECORDED",
         "primary_goal" => "General Wellness",
+        "calories_target" => 2200,
+        "protein_target_g" => 140,
         "hr_current" => "NOT_RECORDED",
+        "hr_recorded_at" => null,
         "hr_resting" => "NOT_RECORDED",
         "blood_pressure" => "NOT_RECORDED",
+        "bp_recorded_at" => null,
         "spo2" => "NOT_RECORDED",
+        "spo2_numeric" => null,
+        "spo2_recorded_at" => null,
         "steps_current" => 0,
         "steps_target" => 10000,
+        "today_distance_km" => 0.0,
+        "today_activity_calories" => 0,
         "water_current_ml" => 0,
         "water_target_ml" => 2500,
         "recent_activity_zone" => "Resting / Sedentary",
         "last_sleep_hours" => "NOT_RECORDED",
-        "last_sleep_score" => null
+        "last_sleep_score" => null,
+        "today_nutrition_summary" => "0 kcal logged",
+        "latest_activity_session" => "No reading logged yet"
     ];
 
     // 1. Profile: Height, Weight, Age, Gender, Goal
@@ -555,7 +545,7 @@ function fetchUserHealthContext($conn, $userId) {
         }
     }
 
-    // 2. Health Goals Targets (sync activity_goals & user_health_goals)
+    // 2. Health & Nutrition Targets
     $hgUpdatedAt = null;
     try {
         $gStmt = $conn->prepare("SELECT primary_goal, target_steps, target_water_ml, target_weight_kg, updated_at FROM user_health_goals WHERE user_id = ? LIMIT 1");
@@ -583,13 +573,34 @@ function fetchUserHealthContext($conn, $userId) {
                 }
             }
         }
+        $hgStmt = $conn->prepare("SELECT daily_target_ml FROM hydration_goals WHERE user_id = ? LIMIT 1");
+        if ($hgStmt) {
+            $hgStmt->bind_param("i", $userId);
+            $hgStmt->execute();
+            $hgRes = $hgStmt->get_result()->fetch_assoc();
+            $hgStmt->close();
+            if (!empty($hgRes["daily_target_ml"]) && (int)$hgRes["daily_target_ml"] > 0) {
+                $ctx["water_target_ml"] = (int)$hgRes["daily_target_ml"];
+            }
+        }
+        $ngStmt = $conn->prepare("SELECT daily_calorie_target, daily_protein_target FROM nutrition_goals WHERE user_id = ? LIMIT 1");
+        if ($ngStmt) {
+            $ngStmt->bind_param("i", $userId);
+            $ngStmt->execute();
+            $ngRes = $ngStmt->get_result()->fetch_assoc();
+            $ngStmt->close();
+            if ($ngRes) {
+                if (!empty($ngRes["daily_calorie_target"])) $ctx["calories_target"] = (int)$ngRes["daily_calorie_target"];
+                if (!empty($ngRes["daily_protein_target"])) $ctx["protein_target_g"] = (int)round((float)$ngRes["daily_protein_target"]);
+            }
+        }
     } catch (\Exception $e) {}
 
-    // 3. Live Vitals from DB logged TODAY (Heart Rate, Blood Pressure, SpO2)
+    // 3. Latest Live Vitals with timestamps (Heart Rate, Blood Pressure, SpO2)
     $vStmt = $conn->prepare(
         "SELECT heart_rate, spo2, systolic_bp, diastolic_bp, logged_at 
          FROM vitals_logs 
-         WHERE user_id = ? AND DATE(logged_at) = CURDATE()
+         WHERE user_id = ?
          ORDER BY logged_at DESC LIMIT 1"
     );
     if ($vStmt) {
@@ -599,46 +610,62 @@ function fetchUserHealthContext($conn, $userId) {
         $vStmt->close();
 
         if ($vRes) {
+            $ts = $vRes["logged_at"] ?? null;
             if (!empty($vRes["heart_rate"]) && (int)$vRes["heart_rate"] > 0) {
                 $ctx["hr_current"] = (int)$vRes["heart_rate"];
+                $ctx["hr_recorded_at"] = $ts;
             }
             if (!empty($vRes["spo2"]) && (int)$vRes["spo2"] > 0) {
+                $ctx["spo2_numeric"] = (int)$vRes["spo2"];
                 $ctx["spo2"] = (int)$vRes["spo2"] . "%";
+                $ctx["spo2_recorded_at"] = $ts;
             }
             if (!empty($vRes["systolic_bp"]) && !empty($vRes["diastolic_bp"]) && (int)$vRes["systolic_bp"] > 0 && (int)$vRes["diastolic_bp"] > 0) {
                 $ctx["blood_pressure"] = (int)$vRes["systolic_bp"] . "/" . (int)$vRes["diastolic_bp"] . " mmHg";
+                $ctx["bp_recorded_at"] = $ts;
             }
         }
     }
 
-    // Check vitals_readings table as backup (TODAY only)
-    if ($ctx["hr_current"] === "NOT_RECORDED") {
-        $vrStmt = $conn->prepare("SELECT value_numeric FROM vitals_readings WHERE user_id = ? AND reading_type = 'heart_rate' AND DATE(recorded_at) = CURDATE() ORDER BY recorded_at DESC LIMIT 1");
-        if ($vrStmt) {
-            $vrStmt->bind_param("i", $userId);
-            $vrStmt->execute();
-            $val = $vrStmt->get_result()->fetch_assoc();
-            $vrStmt->close();
-            if ($val && (float)$val["value_numeric"] > 0) {
-                $ctx["hr_current"] = (int)$val["value_numeric"];
-            }
+    // Check vitals_readings for latest recorded individual vitals (including Health Connect syncs)
+    $vrStmt = $conn->prepare("SELECT value_numeric, recorded_at FROM vitals_readings WHERE user_id = ? AND reading_type = 'heart_rate' ORDER BY recorded_at DESC LIMIT 1");
+    if ($vrStmt) {
+        $vrStmt->bind_param("i", $userId);
+        $vrStmt->execute();
+        $val = $vrStmt->get_result()->fetch_assoc();
+        $vrStmt->close();
+        if ($val && (float)$val["value_numeric"] > 0 && ($ctx["hr_current"] === "NOT_RECORDED" || strtotime((string)$val["recorded_at"]) >= strtotime((string)($ctx["hr_recorded_at"] ?? "1970-01-01")))) {
+            $ctx["hr_current"] = (int)$val["value_numeric"];
+            $ctx["hr_recorded_at"] = $val["recorded_at"] ?? null;
         }
     }
 
-    if ($ctx["spo2"] === "NOT_RECORDED") {
-        $vsStmt = $conn->prepare("SELECT value_numeric FROM vitals_readings WHERE user_id = ? AND reading_type = 'spo2' AND DATE(recorded_at) = CURDATE() ORDER BY recorded_at DESC LIMIT 1");
-        if ($vsStmt) {
-            $vsStmt->bind_param("i", $userId);
-            $vsStmt->execute();
-            $val = $vsStmt->get_result()->fetch_assoc();
-            $vsStmt->close();
-            if ($val && (float)$val["value_numeric"] > 0) {
-                $ctx["spo2"] = (int)$val["value_numeric"] . "%";
-            }
+    $vsStmt = $conn->prepare("SELECT value_numeric, recorded_at FROM vitals_readings WHERE user_id = ? AND reading_type = 'spo2' ORDER BY recorded_at DESC LIMIT 1");
+    if ($vsStmt) {
+        $vsStmt->bind_param("i", $userId);
+        $vsStmt->execute();
+        $val = $vsStmt->get_result()->fetch_assoc();
+        $vsStmt->close();
+        if ($val && (float)$val["value_numeric"] > 0 && ($ctx["spo2"] === "NOT_RECORDED" || strtotime((string)$val["recorded_at"]) >= strtotime((string)($ctx["spo2_recorded_at"] ?? "1970-01-01")))) {
+            $ctx["spo2_numeric"] = (int)$val["value_numeric"];
+            $ctx["spo2"] = (int)$val["value_numeric"] . "%";
+            $ctx["spo2_recorded_at"] = $val["recorded_at"] ?? null;
         }
     }
 
-    // Resting Heart Rate Baseline (TODAY only, no fake defaults)
+    $vbpStmt = $conn->prepare("SELECT value_numeric, value_secondary, recorded_at FROM vitals_readings WHERE user_id = ? AND reading_type = 'blood_pressure' ORDER BY recorded_at DESC LIMIT 1");
+    if ($vbpStmt) {
+        $vbpStmt->bind_param("i", $userId);
+        $vbpStmt->execute();
+        $val = $vbpStmt->get_result()->fetch_assoc();
+        $vbpStmt->close();
+        if ($val && (float)$val["value_numeric"] > 0 && (float)$val["value_secondary"] > 0 && ($ctx["blood_pressure"] === "NOT_RECORDED" || strtotime((string)$val["recorded_at"]) >= strtotime((string)($ctx["bp_recorded_at"] ?? "1970-01-01")))) {
+            $ctx["blood_pressure"] = (int)$val["value_numeric"] . "/" . (int)$val["value_secondary"] . " mmHg";
+            $ctx["bp_recorded_at"] = $val["recorded_at"] ?? null;
+        }
+    }
+
+    // Resting Heart Rate Baseline (TODAY)
     $rStmt = $conn->prepare("SELECT MIN(heart_rate) as resting_hr FROM vitals_logs WHERE user_id = ? AND DATE(logged_at) = CURDATE() AND heart_rate >= 45 AND heart_rate <= 110");
     if ($rStmt) {
         $rStmt->bind_param("i", $userId);
@@ -652,10 +679,12 @@ function fetchUserHealthContext($conn, $userId) {
         }
     }
 
-    // 4. Daily Steps
+    // 4. Daily Steps & Latest Activity / Cycling Session
     $today = date("Y-m-d");
     $actStmt = $conn->prepare(
-        "SELECT COALESCE(SUM(steps), 0) AS total_steps, MAX(activity_type) as last_act 
+        "SELECT COALESCE(SUM(steps), 0) AS total_steps,
+                COALESCE(SUM(distance_km), 0) AS total_dist,
+                COALESCE(SUM(calories_burned), 0) AS total_cal
          FROM activity_sessions 
          WHERE user_id = ? AND DATE(start_time) = ?"
     );
@@ -665,6 +694,27 @@ function fetchUserHealthContext($conn, $userId) {
         $actRes = $actStmt->get_result()->fetch_assoc();
         $actStmt->close();
         $ctx["steps_current"] = (int)($actRes["total_steps"] ?? 0);
+        $ctx["today_distance_km"] = round((float)($actRes["total_dist"] ?? 0), 2);
+        $ctx["today_activity_calories"] = (int)($actRes["total_cal"] ?? 0);
+    }
+
+    $laStmt = $conn->prepare(
+        "SELECT activity_type, duration_seconds, distance_km, calories_burned, start_time
+         FROM activity_sessions
+         WHERE user_id = ?
+         ORDER BY id DESC LIMIT 1"
+    );
+    if ($laStmt) {
+        $laStmt->bind_param("i", $userId);
+        $laStmt->execute();
+        $laRes = $laStmt->get_result()->fetch_assoc();
+        $laStmt->close();
+        if ($laRes) {
+            $mins = floor((int)$laRes["duration_seconds"] / 60);
+            $dist = round((float)$laRes["distance_km"], 2);
+            $cal = (int)$laRes["calories_burned"];
+            $ctx["latest_activity_session"] = "{$laRes['activity_type']}: {$dist} km, {$mins} min, {$cal} kcal ({$laRes['start_time']})";
+        }
     }
 
     // 5. Exertion Zone
@@ -683,8 +733,7 @@ function fetchUserHealthContext($conn, $userId) {
 
     // 6. Today's Hydration
     $hStmt = $conn->prepare(
-        "SELECT COALESCE(SUM(volume_ml), SUM(intake_ml), SUM(amount_ml), 0) AS total_ml,
-                COALESCE(MAX(target_ml), 2500) AS target 
+        "SELECT COALESCE(SUM(COALESCE(volume_ml, intake_ml, amount_ml, 0)), 0) AS total_ml
          FROM hydration_logs 
          WHERE user_id = ? AND (log_date = ? OR date_string = ? OR DATE(logged_at) = ?)"
     );
@@ -695,13 +744,12 @@ function fetchUserHealthContext($conn, $userId) {
         $hStmt->close();
         if ($hRes) {
             $ctx["water_current_ml"] = (int)($hRes["total_ml"] ?? 0);
-            if (!empty($hRes["target"])) $ctx["water_target_ml"] = (int)$hRes["target"];
         }
     }
 
     // 7. Latest Sleep
     $sStmt = $conn->prepare(
-        "SELECT duration_minutes, quality_score 
+        "SELECT duration_minutes, quality_score, log_date 
          FROM sleep_logs 
          WHERE user_id = ? 
          ORDER BY id DESC LIMIT 1"
@@ -711,83 +759,132 @@ function fetchUserHealthContext($conn, $userId) {
         $sStmt->execute();
         $sRes = $sStmt->get_result()->fetch_assoc();
         $sStmt->close();
-        if ($sRes) {
+        if ($sRes && (int)$sRes["duration_minutes"] > 0) {
             $durM = (int)$sRes["duration_minutes"];
             $h = floor($durM / 60);
             $m = $durM % 60;
-            $ctx["last_sleep_hours"] = "{$h}h {$m}m";
+            $score = $sRes["quality_score"] ? " (Score: {$sRes['quality_score']}/100)" : "";
+            $ctx["last_sleep_hours"] = "{$h}h {$m}m{$score}";
             $ctx["last_sleep_score"] = $sRes["quality_score"];
         }
     }
+
+    // 8. Today's Logged Nutrition Macros (gym_nutrition_logs + meal_entries)
+    try {
+        $calTot = 0; $pTot = 0; $cTot = 0; $fTot = 0;
+        $gnStmt = $conn->prepare("SELECT COALESCE(SUM(calories),0) AS cal, COALESCE(SUM(protein_g),0) AS p, COALESCE(SUM(carbs_g),0) AS c, COALESCE(SUM(fats_g),0) AS f FROM gym_nutrition_logs WHERE user_id = ? AND log_date = ?");
+        if ($gnStmt) {
+            $gnStmt->bind_param("is", $userId, $today);
+            $gnStmt->execute();
+            $gnRes = $gnStmt->get_result()->fetch_assoc();
+            $gnStmt->close();
+            if ($gnRes) {
+                $calTot += (int)$gnRes["cal"];
+                $pTot += (int)round((float)$gnRes["p"]);
+                $cTot += (int)round((float)$gnRes["c"]);
+                $fTot += (int)round((float)$gnRes["f"]);
+            }
+        }
+        $meStmt = $conn->prepare("SELECT COALESCE(SUM(calories),0) AS cal, COALESCE(SUM(protein),0) AS p, COALESCE(SUM(carbs),0) AS c, COALESCE(SUM(fat),0) AS f FROM meal_entries WHERE user_id = ? AND entry_date = ?");
+        if ($meStmt) {
+            $meStmt->bind_param("is", $userId, $today);
+            $meStmt->execute();
+            $meRes = $meStmt->get_result()->fetch_assoc();
+            $meStmt->close();
+            if ($meRes) {
+                $calTot += (int)$meRes["cal"];
+                $pTot += (int)round((float)$meRes["p"]);
+                $cTot += (int)round((float)$meRes["c"]);
+                $fTot += (int)round((float)$meRes["f"]);
+            }
+        }
+        if ($calTot > 0 || $pTot > 0) {
+            $ctx["today_nutrition_summary"] = "{$calTot} kcal ({$pTot}g P, {$cTot}g C, {$fTot}g F)";
+        }
+    } catch (\Exception $e) {}
 
     return $ctx;
 }
 
 /**
- * Builds the comprehensive VitalSync AI system prompt enforcing all clinical, reasoning, and grounding rules.
+ * Builds the comprehensive VitalSync AI system prompt enforcing query-proportional length,
+ * exact macro quantity multiplication, combined meal totals, live vitals + Good/Moderate/Poor assessment.
  */
-function buildGeneralAiSystemPrompt(array $ctx = [], array $ragArticles = [], $includeVitals = true) {
-    $heightStr = ($ctx["height_cm"] !== "NOT_RECORDED") ? "**{$ctx["height_cm"]} cm**" : "NOT_RECORDED";
-    $weightStr = ($ctx["weight_kg"] !== "NOT_RECORDED") ? "**{$ctx["weight_kg"]} kg**" : "NOT_RECORDED";
-    $bmiStr = ($ctx["bmi_value"] !== "NOT_RECORDED") ? "**{$ctx["bmi_value"]}**" : "NOT_RECORDED";
-    $bmiCategoryStr = ($ctx["bmi_category"] !== "NOT_RECORDED") ? $ctx["bmi_category"] : "NOT_RECORDED";
-    $hrCurrentStr = is_numeric($ctx["hr_current"]) ? "**{$ctx["hr_current"]} bpm**" : "NOT_RECORDED";
-    $hrRestingStr = ($ctx["hr_resting"] !== "NOT_RECORDED") ? "**{$ctx["hr_resting"]}**" : "NOT_RECORDED";
-    $bpStr = ($ctx["blood_pressure"] !== "NOT_RECORDED") ? "**{$ctx["blood_pressure"]}**" : "NOT_RECORDED";
-    $spo2Str = ($ctx["spo2"] !== "NOT_RECORDED") ? "**{$ctx["spo2"]}**" : "NOT_RECORDED";
+function buildGeneralAiSystemPrompt(array $ctx = [], array $ragArticles = [], $includeVitals = true, string $clientLiveContext = "") {
+    $name = $ctx["name"] ?? "there";
+    $ageStr = !empty($ctx["age"]) ? (string)$ctx["age"] : "Not set";
+    $genderStr = !empty($ctx["gender"]) ? (string)$ctx["gender"] : "Not set";
+    $heightStr = (($ctx["height_cm"] ?? "NOT_RECORDED") !== "NOT_RECORDED") ? "**{$ctx['height_cm']} cm**" : "Not set";
+    $weightStr = (($ctx["weight_kg"] ?? "NOT_RECORDED") !== "NOT_RECORDED") ? "**{$ctx['weight_kg']} kg**" : "Not set";
+    $bmiStr = (($ctx["bmi_value"] ?? "NOT_RECORDED") !== "NOT_RECORDED") ? "**{$ctx['bmi_value']}** ({$ctx['bmi_category']})" : "Not set";
 
-    $stepsCurrent = (int)($ctx["steps_current"] ?? 0);
-    $stepsTarget = (int)($ctx["steps_target"] ?? 10000);
-    $waterCurrent = (int)($ctx["water_current_ml"] ?? 0);
-    $waterTarget = (int)($ctx["water_target_ml"] ?? 2500);
+    $hrStr = is_numeric($ctx["hr_current"] ?? null)
+        ? "**{$ctx['hr_current']} bpm**" . (!empty($ctx["hr_recorded_at"]) ? " (logged {$ctx['hr_recorded_at']})" : "")
+        : "No reading logged yet";
+    $bpStr = (($ctx["blood_pressure"] ?? "NOT_RECORDED") !== "NOT_RECORDED")
+        ? "**{$ctx['blood_pressure']}**" . (!empty($ctx["bp_recorded_at"]) ? " (logged {$ctx['bp_recorded_at']})" : "")
+        : "No reading logged yet";
+    $spo2Str = (($ctx["spo2"] ?? "NOT_RECORDED") !== "NOT_RECORDED")
+        ? "**{$ctx['spo2']}**" . (!empty($ctx["spo2_recorded_at"]) ? " (logged {$ctx['spo2_recorded_at']})" : "")
+        : "No reading logged yet";
 
-    $stepsCurrentStr = number_format($stepsCurrent);
-    $stepsTargetStr = number_format($stepsTarget);
-    $waterCurrentStr = number_format($waterCurrent);
-    $waterTargetStr = number_format($waterTarget);
-    $recentExertion = $ctx["recent_activity_zone"] ?? "Resting / Sedentary";
+    $stepsCurrentStr = number_format((int)($ctx["steps_current"] ?? 0));
+    $stepsTargetStr = number_format((int)($ctx["steps_target"] ?? 10000));
+    $waterCurrentStr = number_format((int)($ctx["water_current_ml"] ?? 0));
+    $waterTargetStr = number_format((int)($ctx["water_target_ml"] ?? 2500));
+    $calTargetStr = number_format((int)($ctx["calories_target"] ?? 2200));
+    $protTargetStr = (int)($ctx["protein_target_g"] ?? 140);
+    $sleepStr = (($ctx["last_sleep_hours"] ?? "NOT_RECORDED") !== "NOT_RECORDED") ? "**{$ctx['last_sleep_hours']}**" : "No reading logged yet";
+    $nutritionStr = $ctx["today_nutrition_summary"] ?? "0 kcal logged";
+    $latestActivityStr = $ctx["latest_activity_session"] ?? "No reading logged yet";
     $goal = $ctx["primary_goal"] ?? "General Wellness";
 
     $prompt = <<<EOT
-You are VitalSync AI, a concise wellness coach. Provide complete, well-rounded answers. Always conclude all bullet points and thoughts cleanly within 250-300 words. Never leave a bullet point or sentence unfinished.
+You are VitalSync AI, a concise, accurate wellness, nutrition, and fitness assistant.
 
-### CORE CLINICAL & BEHAVIORAL RULES:
-1. NLP Tolerance:
-   Seamlessly infer and understand the user's intent despite broken grammar, spelling typos, abbreviations, or shorthand without pointing them out. Never critique or correct the user's phrasing.
-2. Missing Vitals Check:
-   If any requested or relevant vital (Heart Rate, Blood Pressure, SpO2) is marked "NOT_RECORDED", tell the user concisely:
-   "Your [metric] has not been recorded today. Tap '+ Log Vitals' on the Home screen to log your latest reading."
-3. BMI & Weight Guidance:
-   If the user's BMI is between 25.0 and 29.9, clearly state that it falls into the overweight category. Do not give false flattery. Suggest an actionable 300–400 kcal deficit, daily brisk walking, and adequate protein intake.
-4. Activity Analysis:
-   Compare actual steps directly against the daily goal (**{$stepsCurrentStr} / {$stepsTargetStr} steps**). If steps are 0 or lagging behind, highlight the deficit and give realistic pacing tips.
-5. Diet Plans & Nutrition Guidance:
-   If asked for a diet plan or nutrition guidance, output a clear, structured meal breakdown with sections:
-   - Breakfast: Balanced protein and complex carbs
-   - Lunch: Lean protein, fiber-rich vegetables, and whole grains
-   - Snack: Light, high-protein or fruit-based option
-   - Dinner: Digestible protein and micronutrient-dense vegetables
-6. Formatting Standards:
-   Use clean markdown bullet points. ALWAYS bold all metrics, numbers, and targets (e.g., **26.1 BMI**, **0 / 10,000 steps**, **1,200 / 2,500 ml**, **74 bpm**).
-7. Safety:
-   You are a lifestyle wellness companion, not a licensed medical provider. If emergency symptoms (severe chest pressure, fainting, severe shortness of breath) are described, urge immediate medical care.
+### RESPONSE LENGTH & STYLE (STRICT):
+- **Short or direct questions** (single food check, single vital check, personal info lookup, yes/no question, follow-up question): Reply in **2–4 concise sentences OR at most 3 short bullet points**. Do not write long essays, intros, or filler paragraphs.
+- **Detailed / breakdown requests** (multi-item meal macro breakdown, workout routine, full daily summary): Provide a clean, structured breakdown with exact numbers and totals.
+- **Branding**: Refer to yourself only as VitalSync AI. Never display internal model names or raw system/prompt tags.
+- **NLP Tolerance**: Understand typos, shorthand, and informal phrasing naturally without pointing them out.
 
-[PATIENT REAL-TIME TELEMETRY SNAPSHOT]
-- Height: {$heightStr}
-- Weight: {$weightStr}
-- BMI: {$bmiStr} ({$bmiCategoryStr})
-- Heart Rate: {$hrCurrentStr} (Resting baseline: {$hrRestingStr})
+### MACRO BREAKDOWNS, QUANTITY MULTIPLICATION & COMBINED TOTALS:
+- Whenever asked for calories or macros of foods/meals, multiply EVERY food item by the **EXACT quantity requested** (e.g., 10 boiled eggs = 10 x 1 egg; 2 scoops whey = 2 x 1 scoop) rather than reporting single-unit values.
+- Show each item's multiplied **Calories | Protein | Carbs | Fat** and always end with a **Combined Meal Total** summing all items accurately (Calories ~= Protein x 4 + Carbs x 4 + Fat x 9).
+- Verified Reference Macro Baselines:
+  * 1 large whole boiled egg (50g): 75 kcal | 6.3g P | 0.6g C | 5.0g F
+  * 1 egg white (33g): 17 kcal | 3.6g P | 0.2g C | 0.1g F
+  * 1 scoop whey protein (30g): 120 kcal | 24g P | 2g C | 1.5g F
+  * 1 plate beef biryani (280g): 500 kcal | 24g P | 58g C | 18g F
+  * 100g cooked white rice: 130 kcal | 2.7g P | 28g C | 0.3g F
+
+### LIVE APP DATA & GOOD / MODERATE / POOR ASSESSMENT:
+- Use the live user snapshot below directly whenever asked about personal info, vitals, sleep, hydration, steps, meals, or workouts. If a metric reads "No reading logged yet" and is not in the on-device snapshot either, state clearly that no reading is logged yet.
+- For vitals and wellness checks (Heart Rate, SpO2, Hydration, Sleep), ALWAYS provide:
+  1. The exact live reading (+ timestamp if available).
+  2. A clear status rating: **Good**, **Moderate / Fair**, or **Poor / Low** (Resting HR 60-100 bpm = Good, 50-59 or 101-110 = Moderate/Fair, <50 or >110 = Poor/Low; SpO2 95-100% = Good, 90-94% = Moderate/Fair, <90% = Poor/Low; Hydration >=75% target = Good, 40-74% = Moderate/Fair, <40% = Poor/Low; Sleep 7-9h = Good, 6-6.9h = Moderate/Fair, <6h = Poor/Low).
+  3. A brief 1-2 sentence actionable suggestion.
+
+### LIVE USER TELEMETRY (BACKEND DB):
+- Profile: {$name}, Age: {$ageStr}, Gender: {$genderStr}
+- Body Stats: Height {$heightStr}, Weight {$weightStr}, BMI {$bmiStr}
+- Fitness Goal: {$goal} | Daily Targets: **{$calTargetStr} kcal** | **{$protTargetStr}g protein** | **{$waterTargetStr} ml** water | **{$stepsTargetStr} steps**
+- Heart Rate: {$hrStr}
+- SpO2: {$spo2Str}
 - Blood Pressure: {$bpStr}
-- SpO2 (Oxygen Saturation): {$spo2Str}
-- Daily Steps: **{$stepsCurrentStr}** / **{$stepsTargetStr}** target
-- Hydration Volume: **{$waterCurrentStr}** / **{$waterTargetStr}** ml target
-- Current Exertion: {$recentExertion}
-- Primary Health Goal: {$goal}
-[END_TELEMETRY]
+- Daily Steps: **{$stepsCurrentStr}** / **{$stepsTargetStr}**
+- Hydration: **{$waterCurrentStr}** / **{$waterTargetStr} ml**
+- Latest Sleep: {$sleepStr}
+- Today's Logged Nutrition: **{$nutritionStr}**
+- Latest Activity/Cycling Session: {$latestActivityStr}
 EOT;
 
+    if ($clientLiveContext !== "") {
+        $prompt .= "\n\n### LIVE ON-DEVICE APP SNAPSHOT (LATEST PREF/HEALTH CONNECT STATE):\n" . $clientLiveContext;
+    }
+
     if (!empty($ragArticles)) {
-        $prompt .= "\n\n[VERIFIED MEDICAL & NUTRITION FACTS (RAG)]:\n";
+        $prompt .= "\n\n### VERIFIED KNOWLEDGE BASE REFERENCE:\n";
         foreach ($ragArticles as $art) {
             $prompt .= "- {$art['topic']}: {$art['content']}\n";
         }

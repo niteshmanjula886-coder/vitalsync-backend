@@ -52,11 +52,11 @@ if ($heartRate !== null && ($heartRate < 30 || $heartRate > 220)) {
     ]);
 }
 
-if ($spo2 !== null && ($spo2 < 70 || $spo2 > 100)) {
+if ($spo2 !== null && ($spo2 < 50 || $spo2 > 100)) {
     respondJson(400, [
         "success" => false,
         "status" => "error",
-        "message" => "SpO2 must be between 70 and 100%.",
+        "message" => "SpO2 must be between 50 and 100%.",
         "data" => null
     ]);
 }
@@ -97,7 +97,7 @@ if ($systolic !== null && $diastolic !== null) {
     }
 }
 
-$source = "Manual Entry";
+$source = !empty($input["source"]) ? substr(trim((string)$input["source"]), 0, 80) : "Manual Entry";
 
 // 1. Insert combined manual record into vitals_logs
 $stmt = $conn->prepare(

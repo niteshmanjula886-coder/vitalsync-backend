@@ -143,8 +143,18 @@ if ($method === "POST") {
 
     $timeText = date("h:i A");
 
-    // 2. Load conversation history scoped to this specific session before inserting user message
-    $historyMessages = loadConversationHistory($conn, $userId, 4, $sessionId);
+    // 2. Load conversation history (last 10 turns) scoped to this session before inserting user message
+    $historyMessages = loadConversationHistory($conn, $userId, 10, $sessionId);
+    if (empty($historyMessages) && !empty($data["conversation_history"]) && is_array($data["conversation_history"])) {
+        $clientHist = array_slice($data["conversation_history"], -10);
+        foreach ($clientHist as $ch) {
+            if (!is_array($ch)) continue;
+            $cText = trim((string)($ch["content"] ?? ""));
+            if ($cText === "") continue;
+            $cRole = (strtolower(trim((string)($ch["role"] ?? "user"))) === "assistant") ? "assistant" : "user";
+            $historyMessages[] = ["role" => $cRole, "content" => $cText];
+        }
+    }
 
     // 3. Save user message (populate both message and message_text for cross-schema compatibility)
     $uStmt = $conn->prepare("INSERT INTO ai_chat_messages (user_id, session_id, sender, message, message_text, time_text) VALUES (?, ?, 'user', ?, ?, ?)");
@@ -156,12 +166,13 @@ if ($method === "POST") {
     // 4. Perform RAG Knowledge Base Retrieval
     $ragArticles = searchKnowledgeBase($conn, $userText, 1);
 
-    // 5. Detect intent and fetch health context
+    // 5. Fetch comprehensive live user context + optional client live snapshot
     $isPersonalHealth = isUserPersonalHealthQuery($userText);
     $healthContext = fetchUserHealthContext($conn, $userId);
+    $clientLiveContext = trim((string)($data["live_context"] ?? $data["liveContext"] ?? ""));
 
-    // 6. Build general-purpose, RAG-grounded system prompt
-    $systemPrompt = buildGeneralAiSystemPrompt($healthContext, $ragArticles, $isPersonalHealth);
+    // 6. Build query-proportional, macro-accurate, telemetry-grounded system prompt
+    $systemPrompt = buildGeneralAiSystemPrompt($healthContext, $ragArticles, true, $clientLiveContext);
 
     $aiInput = [];
     foreach ($historyMessages as $h) {
