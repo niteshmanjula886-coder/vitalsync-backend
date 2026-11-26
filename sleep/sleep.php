@@ -112,7 +112,33 @@ if ($method === "GET") {
     $rem = $rec ? (int)$rec["rem_sleep_minutes"] : 0;
     $awake = $rec ? (int)$rec["awake_minutes"] : 0;
 
-    // Fallback to sleep_logs if sleep_records empty for this exact date
+    // Fallback to sleep_records recent or sleep_logs if sleep_records empty for this exact date
+    if ($durationMin <= 0) {
+        $recentSr = $conn->prepare(
+            "SELECT id, date_string, duration_minutes, sleep_score, quality_label, bedtime, wake_time, deep_sleep_minutes, light_sleep_minutes, rem_sleep_minutes, awake_minutes, created_at 
+             FROM sleep_records 
+             WHERE user_id = ? AND date_string <= ? AND duration_minutes > 0 
+             ORDER BY date_string DESC LIMIT 1"
+        );
+        if ($recentSr) {
+            $recentSr->bind_param("is", $userId, $date);
+            $recentSr->execute();
+            $recentRec = $recentSr->get_result()->fetch_assoc();
+            $recentSr->close();
+            if ($recentRec && (int)$recentRec["duration_minutes"] > 0) {
+                $durationMin = (int)$recentRec["duration_minutes"];
+                $score = (int)$recentRec["sleep_score"];
+                $recordDate = $recentRec["date_string"];
+                $bedtime = $recentRec["bedtime"];
+                $wakeTime = $recentRec["wake_time"];
+                $deep = (int)$recentRec["deep_sleep_minutes"];
+                $light = (int)$recentRec["light_sleep_minutes"];
+                $rem = (int)$recentRec["rem_sleep_minutes"];
+                $awake = (int)$recentRec["awake_minutes"];
+            }
+        }
+    }
+
     if ($durationMin <= 0) {
         if ($allowPastFallback) {
             $slStmt = $conn->prepare("SELECT id, start_time, end_time, duration_minutes, quality_score, bedtime, wake_time, COALESCE(logged_at, logged_date, DATE(start_time)) AS log_date FROM sleep_logs WHERE user_id = ? AND (logged_at = ? OR logged_at <= ? OR logged_date = ? OR logged_date <= ?) ORDER BY COALESCE(logged_at, logged_date, DATE(start_time)) DESC LIMIT 1");
@@ -289,10 +315,26 @@ if ($method === "POST") {
         $stmt->close();
 
         // Also sync into sleep_logs for master schema persistence
-        $startTime = date("Y-m-d H:i:s", strtotime("$dateString $bedtime"));
-        $endTime = date("Y-m-d H:i:s", strtotime("$dateString $wakeTime"));
-        if (strtotime($endTime) <= strtotime($startTime)) {
-            $endTime = date("Y-m-d H:i:s", strtotime($startTime) + ($duration * 60));
+        if (!empty($data["start_time"])) {
+            $startTime = date("Y-m-d H:i:s", strtotime($data["start_time"]));
+        } else {
+            $btSec = strtotime($bedtime);
+            $wtSec = strtotime($wakeTime);
+            if ($btSec !== false && $wtSec !== false && (int)date("H", $btSec) >= 18 && (int)date("H", $wtSec) < 12) {
+                $prevDate = date("Y-m-d", strtotime("$dateString -1 day"));
+                $startTime = date("Y-m-d H:i:s", strtotime("$prevDate $bedtime"));
+            } else {
+                $startTime = date("Y-m-d H:i:s", strtotime("$dateString $bedtime"));
+            }
+        }
+
+        if (!empty($data["end_time"])) {
+            $endTime = date("Y-m-d H:i:s", strtotime($data["end_time"]));
+        } else {
+            $endTime = date("Y-m-d H:i:s", strtotime("$dateString $wakeTime"));
+            if (strtotime($endTime) <= strtotime($startTime)) {
+                $endTime = date("Y-m-d H:i:s", strtotime($startTime) + ($duration * 60));
+            }
         }
 
         $logCheck = $conn->prepare("SELECT id FROM sleep_logs WHERE user_id = ? AND (logged_at = ? OR logged_date = ?) LIMIT 1");

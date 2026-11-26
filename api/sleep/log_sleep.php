@@ -109,10 +109,26 @@ $mins = $durationMinutes % 60;
 $durationFormatted = "{$hours}h {$mins}m";
 $qualityScore = (isset($input["quality_score"]) && (int)$input["quality_score"] > 0) ? (int)$input["quality_score"] : $sleepScore;
 
-$startTime = !empty($input["start_time"]) ? trim((string)$input["start_time"]) : date("Y-m-d H:i:s", strtotime("$loggedDate $bedtime"));
-$endTime = !empty($input["end_time"]) ? trim((string)$input["end_time"]) : date("Y-m-d H:i:s", strtotime("$loggedDate $wakeTime"));
-if (strtotime($endTime) <= strtotime($startTime)) {
-    $endTime = date("Y-m-d H:i:s", strtotime($startTime) + ($durationMinutes * 60));
+if (!empty($input["start_time"])) {
+    $startTime = date("Y-m-d H:i:s", strtotime($input["start_time"]));
+} else {
+    $btSec = strtotime($bedtime);
+    $wtSec = strtotime($wakeTime);
+    if ($btSec !== false && $wtSec !== false && (int)date("H", $btSec) >= 18 && (int)date("H", $wtSec) < 12) {
+        $prevDate = date("Y-m-d", strtotime("$loggedDate -1 day"));
+        $startTime = date("Y-m-d H:i:s", strtotime("$prevDate $bedtime"));
+    } else {
+        $startTime = date("Y-m-d H:i:s", strtotime("$loggedDate $bedtime"));
+    }
+}
+
+if (!empty($input["end_time"])) {
+    $endTime = date("Y-m-d H:i:s", strtotime($input["end_time"]));
+} else {
+    $endTime = date("Y-m-d H:i:s", strtotime("$loggedDate $wakeTime"));
+    if (strtotime($endTime) <= strtotime($startTime)) {
+        $endTime = date("Y-m-d H:i:s", strtotime($startTime) + ($durationMinutes * 60));
+    }
 }
 
 // Upsert into `sleep_logs` with full user-scoped schema
